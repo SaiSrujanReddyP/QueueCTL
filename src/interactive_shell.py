@@ -47,7 +47,51 @@ class QueueCTLShell(cmd.Cmd):
             if result.stdout:
                 console.print(result.stdout.strip())
             if result.stderr and result.returncode != 0:
-                console.print(f"[red]{result.stderr.strip()}[/red]")
+                stderr_text = result.stderr.strip()
+                
+                # Special handling for config commands
+                if command.startswith("config set"):
+                    parts = command.split()
+                    valid_keys = ["backoff-base", "max-retries"]  # Known config keys
+                    
+                    if len(parts) == 3:  # config set <key> (missing value)
+                        key = parts[2]
+                        if key not in valid_keys:
+                            console.print(f"[red]'{key}' is not a valid config key[/red]")
+                            console.print(f"[dim]Valid keys: {', '.join(valid_keys)}[/dim]")
+                            console.print("[dim]Type 'config list' to see all available keys[/dim]")
+                            return
+                        else:
+                            console.print(f"[red]Missing value for config key '{key}'[/red]")
+                            console.print("[dim]Usage: config set <key> <value>[/dim]")
+                            console.print("[dim]Example: config set max-retries 3[/dim]")
+                            return
+                    elif len(parts) == 2:  # config set (missing key and value)
+                        console.print("[red]Missing config key and value[/red]")
+                        console.print("[dim]Usage: config set <key> <value>[/dim]")
+                        console.print(f"[dim]Valid keys: {', '.join(valid_keys)}[/dim]")
+                        console.print("[dim]Type 'config list' to see all available keys[/dim]")
+                        return
+                
+                # Customize error messages for interactive shell context
+                if "Try 'queuectl.py" in stderr_text and "--help' for help" in stderr_text:
+                    lines = stderr_text.split('\n')
+                    for line in lines:
+                        if "Try 'queuectl.py" in line and "--help' for help" in line:
+                            console.print("[dim]Type 'help' for available commands[/dim]")
+                        elif "Missing argument" in line:
+                            console.print(f"[red]{line}[/red]")
+                            # Add helpful context for missing arguments
+                            if "config set" in command:
+                                console.print("[dim]Type 'config list' to see available keys[/dim]")
+                        elif "Error" in line and not line.startswith("Usage:"):
+                            console.print(f"[red]{line}[/red]")
+                        elif line.startswith("Usage:"):
+                            continue  # Skip usage lines
+                        elif line.strip() and not "Try 'queuectl.py" in line:
+                            console.print(f"[red]{line}[/red]")
+                else:
+                    console.print(f"[red]{stderr_text}[/red]")
                 
         except Exception as e:
             console.print(f"[red]Error executing command: {e}[/red]")
@@ -229,22 +273,79 @@ class QueueCTLShell(cmd.Cmd):
         self.run_queuectl_command(f"metrics --hours {hours}")
     
     def do_dashboard(self, arg):
-        """Start web dashboard"""
-        console.print("[#bbfa01]Starting web dashboard...[/#bbfa01]")
-        console.print("[dim]This will start the dashboard in the background.[/dim]")
-        console.print("[dim]Access it at: http://localhost:8080[/dim]")
+        """Start web dashboard in background"""
+        console.print("[#bbfa01]Starting web dashboard in background...[/#bbfa01]")
         
-        # Start dashboard in background
-        import threading
-        import subprocess
+        try:
+            import threading
+            import sys
+            import os
+            
+            # Get the Python executable and script path
+            python_exe = sys.executable
+            script_path = os.path.join(os.getcwd(), "queuectl.py")
+            
+            def run_dashboard():
+                full_cmd = f'"{python_exe}" "{script_path}" dashboard'
+                # Redirect output to suppress the "Press Ctrl+C" message
+                subprocess.run(full_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Start dashboard in background thread
+            dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+            dashboard_thread.start()
+            
+            console.print("[green]Dashboard started in background![/green]")
+            console.print("[dim]Access it at: http://localhost:8080[/dim]")
+            console.print("[yellow]Note: Dashboard runs in background. Use 'dashboard_stop' to stop it.[/yellow]")
+            console.print("[yellow]TIP: Use 'dashboard_stop' command instead of Ctrl+C to avoid exiting shell![/yellow]")
+                
+        except Exception as e:
+            console.print(f"[red]Error starting dashboard:[/red] {e}")
+    
+    def do_dashboard_stop(self, arg):
+        """Stop the web dashboard"""
+        console.print("[#bbfa01]Stopping web dashboard...[/#bbfa01]")
         
-        def start_dashboard():
-            subprocess.run("python queuectl.py dashboard", shell=True)
-        
-        dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
-        dashboard_thread.start()
-        
-        console.print("[green]Dashboard started! Check http://localhost:8080[/green]")
+        try:
+            import psutil
+            import os
+            
+            killed = False
+            current_pid = os.getpid()  # Don't kill ourselves!
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['pid'] == current_pid:
+                        continue  # Skip our own process
+                        
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'queuectl.py dashboard' in cmdline and 'python' in proc.info['name'].lower():
+                        proc.terminate()
+                        killed = True
+                        console.print(f"[dim]Stopped dashboard process (PID: {proc.info['pid']})[/dim]")
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            if killed:
+                console.print("[green]Dashboard stopped successfully[/green]")
+            else:
+                console.print("[yellow]No dashboard processes found[/yellow]")
+                console.print("[dim]Dashboard may have already stopped or wasn't running[/dim]")
+                
+        except ImportError:
+            console.print("[red]Error: psutil not installed[/red]")
+            console.print("[dim]Install with: pip install psutil[/dim]")
+            console.print("[dim]Or install all dependencies: pip install -r requirements.txt[/dim]")
+            console.print("\n[yellow]Manual stop instructions:[/yellow]")
+            console.print("[dim]1. Open a new terminal/command prompt[/dim]")
+            console.print("[dim]2. Run: python queuectl.py dashboard (then press Ctrl+C)[/dim]")
+            console.print("[dim]3. Or restart this shell to clean up background processes[/dim]")
+            
+        except Exception as e:
+            console.print(f"[yellow]Could not stop dashboard: {e}[/yellow]")
+            console.print("[dim]Try manual stop or restart the shell[/dim]")
+    
+
     
     def do_test_deliverables(self, arg):
         """Test all must-have deliverables"""
@@ -372,7 +473,8 @@ class QueueCTLShell(cmd.Cmd):
         
         console.print("\n[yellow]Demo & Testing:[/yellow]")
         console.print("  [cyan]demo[/cyan]               - Run enhanced demo")
-        console.print("  [cyan]dashboard[/cyan]          - Start web dashboard")
+        console.print("  [cyan]dashboard[/cyan]          - Start web dashboard (background)")
+        console.print("  [cyan]dashboard_stop[/cyan]     - Stop web dashboard")
         console.print("  [cyan]metrics[/cyan]            - Show system metrics")
         
         console.print("\n[yellow]Standard Commands:[/yellow]")
@@ -395,17 +497,8 @@ class QueueCTLShell(cmd.Cmd):
     
     def do_exit(self, arg):
         """Exit the interactive shell"""
-        console.print("[#bbfa01] Thanks for using QueueCTL![/#bbfa01]")
+        console.print("[#bbfa01]Thanks for using QueueCTL![/#bbfa01]")
         return True
-    
-    def do_quit(self, arg):
-        """Exit the interactive shell"""
-        return self.do_exit(arg)
-    
-    def do_EOF(self, arg):
-        """Handle Ctrl+D"""
-        console.print()
-        return self.do_exit(arg)
     
     def emptyline(self):
         """Do nothing on empty line"""
@@ -413,11 +506,14 @@ class QueueCTLShell(cmd.Cmd):
     
     def cmdloop(self, intro=None):
         """Override cmdloop to handle KeyboardInterrupt gracefully"""
-        try:
-            super().cmdloop(intro)
-        except KeyboardInterrupt:
-            console.print("\n[dim]Use 'exit' or Ctrl+D to quit.[/dim]")
-            self.cmdloop()
+        while True:
+            try:
+                super().cmdloop(intro)
+                break  # Normal exit
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Interrupted! Use 'exit' or Ctrl+D to quit the shell.[/yellow]")
+                console.print("[dim]TIP: Use 'dashboard_stop' to stop dashboard instead of Ctrl+C[/dim]")
+                # Continue the loop to restart the shell
 
 
 def start_interactive_shell():
