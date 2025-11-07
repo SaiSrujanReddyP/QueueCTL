@@ -115,19 +115,22 @@ class QueueCTLShell(cmd.Cmd):
             console.print(f"[red]Error executing command: {e}[/red]")
     
     def do_enqueue(self, arg):
-        """Add a job to the queue with optional scheduling
+        """Add a job to the queue with optional scheduling and priority
         Usage: 
           enqueue {"id":"job1","command":"echo hello"}
+          enqueue {"id":"job1","command":"echo hello","priority":10}
           enqueue {"id":"job1","command":"echo hello","run_at":"+30s"}
-          enqueue {"id":"job1","command":"echo hello","run_at":"+5m"}
+          enqueue {"id":"job1","command":"echo hello","run_at":"+5m","priority":5}
           enqueue {"id":"job1","command":"echo hello","run_at":"2025-11-09T22:00:00Z"}
         """
         if not arg.strip():
             console.print("[red]Error: Job JSON required[/red]")
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\"}[/dim]")
+            console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\",\"priority\":10}[/dim]")
             console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\",\"run_at\":\"+30s\"}[/dim]")
-            console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\",\"run_at\":\"+5m\"}[/dim]")
+            console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\",\"run_at\":\"+5m\",\"priority\":5}[/dim]")
+            console.print("[dim]  enqueue {\"id\":\"test\",\"command\":\"echo hello\",\"run_at\":\"2025-11-09T22:00:00Z\"}[/dim]")
             return
         
         # Handle JSON properly by escaping quotes
@@ -185,55 +188,6 @@ class QueueCTLShell(cmd.Cmd):
         escaped_json = processed_json.replace('"', '\\"')
         self.run_queuectl_command(f'enqueue "{escaped_json}"')
 
-    def do_add(self, arg):
-        """Add a simple job to the queue
-        Usage: add <command> [--id job_id] [--priority N]
-        Example: add "echo hello world" --id my-job --priority 5
-        """
-        if not arg.strip():
-            console.print("[red]Error: Command required[/red]")
-            console.print("[dim]Example: add \"echo hello world\" --id my-job[/dim]")
-            return
-        
-        import shlex
-        import time
-        import json
-        
-        try:
-            # Parse arguments
-            parts = shlex.split(arg)
-            command = parts[0]
-            
-            # Default values
-            job_id = f"job_{int(time.time())}"
-            priority = 0
-            
-            # Parse optional arguments
-            i = 1
-            while i < len(parts):
-                if parts[i] == "--id" and i + 1 < len(parts):
-                    job_id = parts[i + 1]
-                    i += 2
-                elif parts[i] == "--priority" and i + 1 < len(parts):
-                    try:
-                        priority = int(parts[i + 1])
-                    except ValueError:
-                        console.print("[red]Error: Priority must be a number[/red]")
-                        return
-                    i += 2
-                else:
-                    i += 1
-            
-            # Create job JSON
-            job = {"id": job_id, "command": command, "priority": priority}
-            job_json = json.dumps(job).replace('"', '\\"')
-            
-            console.print(f"[dim]Adding job: {job_id}[/dim]")
-            self.run_queuectl_command(f'enqueue "{job_json}"')
-            
-        except Exception as e:
-            console.print(f"[red]Error parsing command: {e}[/red]")
-            console.print("[dim]Example: add \"echo hello world\" --id my-job[/dim]")
 
     def do_status(self, arg):
         """Show system status including worker and job information"""
@@ -266,28 +220,14 @@ class QueueCTLShell(cmd.Cmd):
             if result.stdout:
                 console.print(result.stdout)
                 
-                # Show scheduled job countdown
-                scheduled_jobs = []
-                for line in result.stdout.split('\n'):
-                    if '| scheduled |' in line and '|' in line:
-                        parts = line.split('|')
-                        if len(parts) >= 2:
-                            job_id = parts[1].strip()
-                            scheduled_jobs.append(job_id)
-                
-                if scheduled_jobs:
-                    console.print(f"\n[yellow]⏰ Scheduled Jobs:[/yellow]")
-                    console.print("[dim]+-----------------+-----------+[/dim]")
-                    console.print("[dim]| Job ID          | State     |[/dim]")
-                    console.print("[dim]+-----------------+-----------+[/dim]")
-                    
-                    for job_id in scheduled_jobs:
-                        # Format the display
-                        job_display = job_id[:15] + "…" if len(job_id) > 16 else job_id
-                        console.print(f"[dim]| {job_display:<15} | scheduled |[/dim]")
-                    
-                    console.print("[dim]+-----------------+-----------+[/dim]")
-                    console.print("[dim]Note: Scheduled jobs will automatically become pending when their time arrives[/dim]")
+                # Show filtering tip
+                console.print(f"\n[dim]💡 Filter by job type:[/dim]")
+                console.print(f"[dim]  list --state pending     - Show only pending jobs[/dim]")
+                console.print(f"[dim]  list --state processing  - Show only processing jobs[/dim]")
+                console.print(f"[dim]  list --state completed   - Show only completed jobs[/dim]")
+                console.print(f"[dim]  list --state failed      - Show only failed jobs[/dim]")
+                console.print(f"[dim]  list --state dead        - Show only dead letter queue jobs[/dim]")
+                console.print(f"[dim]  list --state scheduled   - Show only scheduled jobs[/dim]")
             else:
                 console.print("[red]No output from list command[/red]")
     
@@ -506,23 +446,7 @@ class QueueCTLShell(cmd.Cmd):
         """Display job counts in a nice format"""
         console.print(f"Pending: {counts['pending']} | Processing: {counts['processing']} | Completed: {counts['completed']} | Failed: {counts['failed']} | Dead: {counts['dead']} | Scheduled: {counts['scheduled']}")
     
-    def do_scheduled(self, arg):
-        """Show all scheduled jobs"""
-        result = subprocess.run("python queuectl.py list --state scheduled", shell=True, capture_output=True, text=True)
-        
-        if not result.stdout or "No jobs found" in result.stdout:
-            console.print("[yellow]No scheduled jobs found.[/yellow]")
-            return
-        
-        console.print("[yellow]📅 Scheduled Jobs:[/yellow]")
-        console.print(result.stdout)
-        
-        # Show current UTC time for reference
-        import datetime
-        utc_now = datetime.datetime.now(datetime.timezone.utc)
-        console.print(f"\n[dim]Current UTC time: {utc_now.strftime('%Y-%m-%d %H:%M:%S')}[/dim]")
-        console.print("[dim]Scheduled jobs will automatically become pending when their time arrives.[/dim]")
-    
+
     def do_time(self, arg):
         """Show current time in both local and UTC"""
         import datetime
@@ -571,35 +495,20 @@ class QueueCTLShell(cmd.Cmd):
         command = parts[0]
         
         if command == "list":
-            # First show the original DLQ table for detailed info
-            console.print("[yellow]Dead Letter Queue:[/yellow]")
+            # Show the DLQ table (now with full IDs thanks to our fix)
             result = subprocess.run("python queuectl.py dlq list", shell=True, capture_output=True, text=True)
             if result.stdout:
                 console.print(result.stdout)
                 
-                # Now get full job IDs by querying the database directly
-                console.print("\n[yellow]Full Job IDs for retry:[/yellow]")
-                
-                # Try to get full IDs using a different approach
-                full_ids_result = subprocess.run("python queuectl.py list --state dead --format json", shell=True, capture_output=True, text=True)
-                if full_ids_result.returncode == 0 and full_ids_result.stdout:
-                    try:
-                        import json
-                        jobs_data = json.loads(full_ids_result.stdout)
-                        dlq_jobs = [job['id'] for job in jobs_data if job.get('state') == 'dead']
-                    except:
-                        # Fallback: parse the regular output and try to extract IDs
-                        dlq_jobs = self._extract_job_ids_from_dlq()
-                else:
-                    # Fallback: parse the regular output and try to extract IDs
-                    dlq_jobs = self._extract_job_ids_from_dlq()
+                # Also get full job IDs for easy copy-paste
+                dlq_jobs = self._extract_job_ids_from_dlq()
                 
                 if dlq_jobs:
-                    console.print(f"\n[dim]Available jobs for retry ({len(dlq_jobs)} total):[/dim]")
+                    console.print(f"\n[yellow]Full Job IDs for retry:[/yellow]")
                     for i, job_id in enumerate(dlq_jobs, 1):
                         console.print(f"  {i}. [red]{job_id}[/red]")
                     
-                    console.print(f"\n[dim]💡 Usage:[/dim]")
+                    console.print(f"\n[dim] Usage:[/dim]")
                     console.print(f"[dim]  dlq retry <full_job_id>     - Retry with full ID[/dim]")
                     console.print(f"[dim]  dlq retry demo_fail_176     - Retry with partial ID (auto-match)[/dim]")
                 else:
@@ -630,34 +539,39 @@ class QueueCTLShell(cmd.Cmd):
             self.run_queuectl_command(f"dlq {arg}")
     
     def _extract_job_ids_from_dlq(self):
-        """Extract job IDs from DLQ by parsing database or command output"""
+        """Extract job IDs from DLQ by querying the database directly"""
         try:
-            # Try to get jobs from the database directly using the DLQ command
-            result = subprocess.run("python queuectl.py dlq list", shell=True, capture_output=True, text=True)
-            if result.stdout:
-                job_ids = []
-                lines = result.stdout.split('\n')
-                for line in lines:
-                    # Look for lines with job data (contains | and demo_fail or other job patterns)
-                    if '|' in line and ('demo_fail' in line or 'job_' in line or 'quick_' in line):
-                        parts = line.split('|')
-                        if len(parts) >= 2:
-                            job_id = parts[1].strip()
-                            # If the ID is truncated (ends with …), try to reconstruct it
-                            if job_id and job_id != 'ID':
-                                if job_id.endswith('…'):
-                                    # Try to find the full ID by matching pattern
-                                    full_id = self._find_full_job_id_pattern(job_id.replace('…', ''))
-                                    if full_id:
-                                        job_ids.append(full_id)
-                                    else:
-                                        job_ids.append(job_id)  # Keep truncated as fallback
-                                else:
+            # Import the job queue module to query directly
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+            from src.job_queue import JobQueue
+            
+            # Create job queue instance and get dead jobs directly
+            job_queue = JobQueue()
+            dead_jobs = job_queue.list_jobs('dead')
+            
+            return [job['id'] for job in dead_jobs]
+        except Exception as e:
+            # Fallback to command parsing if direct access fails
+            try:
+                result = subprocess.run("python queuectl.py list --state dead", shell=True, capture_output=True, text=True)
+                if result.stdout:
+                    job_ids = []
+                    lines = result.stdout.split('\n')
+                    for line in lines:
+                        # Look for lines that contain job IDs
+                        line = line.strip()
+                        if '|' in line and ('demo_fail' in line or 'job_' in line or 'quick_' in line):
+                            parts = line.split('|')
+                            if len(parts) >= 1:
+                                job_id = parts[0].strip()
+                                if job_id and job_id != 'ID' and not job_id.startswith('-') and not job_id.startswith('+'):
                                     job_ids.append(job_id)
-                return job_ids
-            return []
-        except:
-            return []
+                    return job_ids
+                return []
+            except:
+                return []
     
     def _find_full_job_id_pattern(self, partial_id):
         """Try to find full job ID by pattern matching"""
@@ -685,16 +599,6 @@ class QueueCTLShell(cmd.Cmd):
                 if partial_id in job_id:
                     return job_id
             
-            # Fallback: try direct database query
-            result = subprocess.run("python queuectl.py list --state dead", shell=True, capture_output=True, text=True)
-            if result.stdout:
-                for line in result.stdout.split('\n'):
-                    if '| dead |' in line and '|' in line:
-                        parts = line.split('|')
-                        if len(parts) >= 2:
-                            job_id = parts[1].strip()
-                            if partial_id in job_id:
-                                return job_id
             return None
         except:
             return None
@@ -715,27 +619,7 @@ class QueueCTLShell(cmd.Cmd):
         
         self.run_queuectl_command(f"config {arg}")
     
-    def do_quick(self, arg):
-        """Quick job creation with simple syntax
-        Usage: quick <command>
-        Example: quick echo hello world
-        """
-        if not arg.strip():
-            console.print("[red]Error: Command required[/red]")
-            console.print("[dim]Example: quick echo hello world[/dim]")
-            return
-        
-        # Generate a simple job ID
-        import time
-        job_id = f"quick_{int(time.time())}"
-        
-        # Create job JSON
-        job = {"id": job_id, "command": arg}
-        job_json = json.dumps(job).replace('"', '\\"')
-        
-        console.print(f"[dim]Creating job: {job_id}[/dim]")
-        self.run_queuectl_command(f'enqueue "{job_json}"')
-    
+
     def do_demo(self, arg):
         """Run a quick demo with enhanced features"""
         console.print("[#bbfa01]Running Enhanced Demo...[/#bbfa01]")
@@ -764,57 +648,7 @@ class QueueCTLShell(cmd.Cmd):
         console.print("[dim]• Failed job will demonstrate retry logic[/dim]")
         console.print("[dim]Start workers with: worker start --count 2[/dim]")
     
-    def do_schedule(self, arg):
-        """Schedule a job to run later
-        Usage: schedule <command> [+time]
-        Example: schedule echo hello +5m
-        """
-        if not arg.strip():
-            console.print("[red]Error: Command required[/red]")
-            console.print("[dim]Example: schedule echo hello +5m[/dim]")
-            return
-        
-        parts = arg.strip().split()
-        if len(parts) < 2:
-            console.print("[red]Error: Command and time required[/red]")
-            console.print("[dim]Example: schedule echo hello +5m[/dim]")
-            return
-        
-        time_spec = parts[-1]
-        command = ' '.join(parts[:-1])
-        
-        if not time_spec.startswith('+'):
-            console.print("[red]Error: Time must start with + (e.g., +5m, +1h)[/red]")
-            return
-        
-        # Generate job
-        import time as time_module
-        job_id = f"scheduled_{int(time_module.time())}"
-        job = {"id": job_id, "command": command, "run_at": time_spec}
-        job_json = json.dumps(job).replace('"', '\\"')
-        
-        console.print(f"[dim]Scheduling job: {job_id} to run {time_spec}[/dim]")
-        self.run_queuectl_command(f'schedule "{job_json}"')
-    
-    def do_priority(self, arg):
-        """Create a high priority job
-        Usage: priority <command>
-        Example: priority echo urgent task
-        """
-        if not arg.strip():
-            console.print("[red]Error: Command required[/red]")
-            console.print("[dim]Example: priority echo urgent task[/dim]")
-            return
-        
-        # Generate high priority job
-        import time
-        job_id = f"priority_{int(time.time())}"
-        job = {"id": job_id, "command": arg, "priority": 10}
-        job_json = json.dumps(job).replace('"', '\\"')
-        
-        console.print(f"[dim]Creating high priority job: {job_id}[/dim]")
-        self.run_queuectl_command(f'enqueue "{job_json}"')
-    
+
     def do_metrics(self, arg):
         """Show system metrics"""
         hours = 24
@@ -1023,23 +857,7 @@ class QueueCTLShell(cmd.Cmd):
         """Show the QueueCTL banner"""
         show_banner()
     
-    def do_jobs_stuck(self, arg):
-        """Check for jobs stuck in processing state"""
-        console.print("[#bbfa01]Checking for stuck jobs...[/#bbfa01]")
-        
-        # Get jobs that have been processing for too long
-        result = subprocess.run("python queuectl.py list --state processing", shell=True, capture_output=True, text=True)
-        
-        if result.stdout and "No jobs found" not in result.stdout:
-            console.print("[yellow]Jobs currently in processing state:[/yellow]")
-            console.print(result.stdout)
-            console.print("\n[dim]If jobs are stuck, you can:[/dim]")
-            console.print("[dim]1. Stop workers: worker stop[/dim]")
-            console.print("[dim]2. Restart workers: worker start --count 2[/dim]")
-            console.print("[dim]3. Check worker processes manually[/dim]")
-        else:
-            console.print("[green]No jobs stuck in processing state[/green]")
-    
+
 
     def do_exit(self, arg):
         """Exit the interactive shell"""

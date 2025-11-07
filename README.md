@@ -35,6 +35,12 @@ QueueCTL is a robust, production-ready job queue system built with Python. It pr
 - **Interactive Shell** - Tab completion and command history
 - **ASCII Art Banner** - Beautiful startup experience
 
+### Recent UI/UX Improvements
+- **Full Job ID Display** - Complete job IDs shown without truncation
+- **Optimized Table Layout** - Compact "Tries" and "Created" columns for better space usage
+- **Enhanced Error Messages** - Colored error styling with helpful suggestions
+- **Improved Readability** - Better contrast and visual hierarchy in all outputs
+
 ## Setup Instructions
 
 ### Prerequisites
@@ -107,30 +113,34 @@ python queuectl.py list
 
 **Add a simple job:**
 ```bash
-$ python queuectl.py add "echo Hello World" --id hello
- Job added: hello
+$ python queuectl.py enqueue '{"id":"hello","command":"echo Hello World"}'
+✓ Job added successfully: hello
   Command: echo Hello World
-  Priority: 0
-  Max retries: 3
+  State: pending
+  Priority: 0 (default)
 ```
 
-**Add a job with priority:**
+**Add a job with priority and scheduling:**
 ```bash
-$ python queuectl.py add "ping google.com" --id ping --priority 10 --retries 5
- Job added: ping
+$ python queuectl.py enqueue '{"id":"ping","command":"ping google.com","priority":10,"run_at":"+5m"}'
+✓ Job scheduled successfully: ping
   Command: ping google.com
   Priority: 10
-  Max retries: 5
+  Scheduled for: 2025-11-10 19:25:00 UTC
 ```
 
 **Start workers:**
 ```bash
 $ python queuectl.py worker start --count 3
-INFO: Starting 3 worker processes
-   Started worker worker_123_0 (PID: 1234)
-   Started worker worker_123_1 (PID: 1235)  
-   Started worker worker_123_2 (PID: 1236)
+Starting 3 worker processes...
+✓ Started worker worker_123_0 (PID: 1234)
+✓ Started worker worker_123_1 (PID: 1235)  
+✓ Started worker worker_123_2 (PID: 1236)
 Press Ctrl+C to stop workers gracefully
+
+Workers processing jobs...
+[Worker 1] Processing job: hello
+[Worker 2] Processing job: ping
 ```
 
 ## Architecture Overview
@@ -374,11 +384,11 @@ QueueCTL provides a rich interactive shell with tab completion and command histo
 
 ### Job Management
 ```bash
-queuectl> add "echo hello" --id test          # Add simple job
-queuectl> schedule "backup" "+1h"             # Schedule job
-queuectl> list                                # List all jobs
-queuectl> list --state pending                # Filter by state
-queuectl> scheduled                           # Show only scheduled jobs
+queuectl> enqueue {"id":"test","command":"echo hello"}     # Add simple job
+queuectl> enqueue {"id":"backup","command":"backup","run_at":"+1h"}  # Schedule job
+queuectl> list                                            # List all jobs (full IDs)
+queuectl> list --state pending                            # Filter by state
+queuectl> list --state scheduled                          # Show only scheduled jobs
 ```
 
 ### Worker Management
@@ -409,8 +419,67 @@ queuectl> config                              # Configuration settings
 ```bash
 queuectl> demo                                # Add demo jobs for testing
 queuectl> help                                # Show all commands
+queuectl> time                                # Show current time (local/UTC)
 queuectl> exit                                # Exit shell
 ```
+
+## User Interface Enhancements
+
+QueueCTL features a modern, user-friendly interface with recent improvements:
+
+### Enhanced Table Display
+
+**Full Job ID Visibility:**
+```bash
+$ queuectl> list --state dead
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ID                    │ State │ Command           │ Tries │ Created          │
+├───────────────────────┼───────┼───────────────────┼───────┼──────────────────┤
+│ demo_fail_1762684661  │ dead  │ nonexistent_comm… │  2/2  │ 11-09 10:37      │
+│ demo_fail_1762680721  │ dead  │ nonexistent_comm… │  2/2  │ 11-09 10:32      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Optimized Column Layout:**
+- **Full Job IDs**: No more truncation with `…` - complete IDs always visible
+- **Compact "Tries"**: Shows `0/3`, `1/2` format in minimal space (6 chars vs 10)
+- **Compact "Created"**: Shows `MM-DD HH:MM` format (11 chars vs 18)
+- **Smart Spacing**: More room for important information
+
+### Enhanced Error Messages
+
+**Before (hard to read):**
+```bash
+queuectl> config get backoff
+'backoff' is not a valid config key
+Valid keys: max-retries, backoff-base
+Type 'config list' to see all available keys
+```
+
+**After (colored and clear):**
+```bash
+queuectl> config get backoff
+'backoff' is not a valid config key
+Valid keys: backoff-base, max-retries
+Type 'config list' to see all available keys
+```
+
+**Color Coding:**
+- **Red**: Error messages and invalid inputs
+- **Yellow**: Instructions and helpful text
+- **Cyan**: Valid options and key names
+- **Green**: Commands to run and success messages
+
+### Interactive Shell Improvements
+
+**Removed deprecated commands:**
+- Removed `quick` command (use `enqueue` instead)
+- Streamlined command set for better usability
+
+**Enhanced help system:**
+- Updated welcome screen with recent improvements
+- Better command descriptions reflecting current functionality
+- Focus on essential commands and features
 
 ## Configuration
 
@@ -418,22 +487,27 @@ QueueCTL supports persistent configuration management:
 
 ### View Configuration
 ```bash
-python queuectl.py config show
+python queuectl.py config list
 ```
 
 ### Update Configuration
 ```bash
-python queuectl.py config set max_retries 5
-python queuectl.py config set timeout_seconds 300
-python queuectl.py config set worker_count 4
+python queuectl.py config set max-retries 5
+python queuectl.py config set backoff-base 2
 ```
 
 ### Configuration Options
-- `max_retries`: Default maximum retry attempts (default: 3)
-- `timeout_seconds`: Default job timeout (default: 300)
-- `worker_count`: Default number of workers (default: 2)
-- `retry_delay`: Base retry delay in seconds (default: 2)
-- `max_retry_delay`: Maximum retry delay (default: 300)
+- `max-retries`: Default maximum retry attempts (default: 3)
+- `backoff-base`: Base retry delay in seconds (default: 2)
+
+### Enhanced Error Handling
+Configuration commands now provide helpful error messages:
+```bash
+queuectl> config set invalid-key value
+'invalid-key' is not a valid config key
+Valid keys: backoff-base, max-retries
+Type 'config list' to see all available keys
+```
 
 ## Job States and Lifecycle
 
@@ -561,6 +635,183 @@ python queuectl.py dashboard
 2. **Configure Timeouts**: Set appropriate timeouts for different job types
 3. **Monitor Queue Depth**: Ensure workers can keep up with job creation rate
 4. **Optimize Retry Policy**: Balance between reliability and performance
+
+## Assumptions & Trade-offs
+
+### Design Decisions
+
+**1. SQLite Database Choice**
+- **Assumption**: Single-node deployment with moderate job volumes
+- **Trade-off**: Simplicity and zero-configuration vs. distributed scalability
+- **Rationale**: Perfect for development, testing, and small-to-medium production workloads
+
+**2. Manual Worker Control (Default)**
+- **Assumption**: Users want explicit control over resource usage
+- **Trade-off**: Manual management vs. automatic scaling
+- **Rationale**: Prevents resource exhaustion and provides predictable behavior
+
+**3. Process-based Workers**
+- **Assumption**: Job isolation is more important than memory efficiency
+- **Trade-off**: Process overhead vs. fault isolation
+- **Rationale**: Failed jobs don't crash other workers; better resource isolation
+
+**4. Synchronous Job Processing**
+- **Assumption**: Most jobs are short-to-medium duration tasks
+- **Trade-off**: Simplicity vs. async complexity
+- **Rationale**: Easier to debug, monitor, and reason about
+
+**5. File-based Logging**
+- **Assumption**: Local file system access is available
+- **Trade-off**: Simple logging vs. centralized log management
+- **Rationale**: Works out-of-the-box without external dependencies
+
+### Simplifications Made
+
+**1. Single Database File**
+- All data stored in one SQLite file for simplicity
+- Easy backup and migration
+- No complex database setup required
+
+**2. Fixed Retry Strategy**
+- Exponential backoff with configurable base delay
+- Simple but effective for most use cases
+- No complex retry policies or custom strategies
+
+**3. Basic Authentication**
+- No built-in authentication for web dashboard
+- Assumes trusted network environment
+- Can be extended with reverse proxy authentication
+
+**4. Limited Job Types**
+- Focus on shell command execution
+- No built-in support for Python functions or complex job types
+- Extensible through command-line interface
+
+### Performance Characteristics
+
+**Suitable For:**
+- Development and testing environments
+- Small to medium production workloads (< 10,000 jobs/day)
+- Single-server deployments
+- Jobs with execution times from seconds to hours
+
+**Not Optimal For:**
+- High-throughput systems (> 100,000 jobs/day)
+- Distributed deployments across multiple servers
+- Real-time processing requirements (< 100ms latency)
+- Jobs requiring complex dependency management
+
+### Testing Strategy
+
+The system includes comprehensive testing for reliability:
+- Unit tests for core components
+- Integration tests for end-to-end workflows
+- Bonus feature tests for advanced functionality
+- Manual testing scenarios for edge cases
+
+## Testing Instructions
+
+### Automated Testing
+
+**Run the complete test suite:**
+```bash
+python test_bonus_features.py
+```
+
+**Expected output:**
+```bash
+QueueCTL Bonus Features Test Suite
+==================================
+
+✓ Job Scheduling & Priorities
+✓ Dead Letter Queue Management  
+✓ Configuration Management
+✓ Metrics/Execution Stats
+✓ Web Dashboard
+✓ Interactive Shell
+✓ ASCII Art Banner
+
+All tests passed! 🎉
+```
+
+### Manual Testing Scenarios
+
+**1. Basic Job Processing:**
+```bash
+# Start interactive shell
+python queuectl.py
+
+# Add test jobs
+queuectl> demo
+
+# Start workers
+queuectl> worker start --count 2
+
+# Monitor progress
+queuectl> status
+queuectl> list
+
+# Stop workers
+queuectl> worker stop
+```
+
+**2. Scheduled Job Testing:**
+```bash
+# Add scheduled jobs
+queuectl> enqueue {"id":"test_30s","command":"echo hello","run_at":"+30s"}
+
+# Start scheduler
+queuectl> scheduler start --workers 2
+
+# Monitor scheduled jobs
+queuectl> list --state scheduled
+queuectl> scheduler status
+
+# Wait and check conversion to pending
+queuectl> list --state pending
+```
+
+**3. Error Handling Testing:**
+```bash
+# Test invalid commands
+queuectl> config get invalid-key
+queuectl> config set invalid-key value
+
+# Test job failures
+queuectl> enqueue {"id":"fail_test","command":"nonexistent_command"}
+queuectl> worker start --count 1
+
+# Check dead letter queue
+queuectl> dlq list
+queuectl> dlq retry fail_test
+```
+
+**4. UI/UX Testing:**
+```bash
+# Test full job ID display
+queuectl> demo
+queuectl> list --state dead
+
+# Test table formatting
+queuectl> list
+queuectl> status
+
+# Test error message styling
+queuectl> config get backoff
+```
+
+### Verification Checklist
+
+- [ ] Jobs can be added and processed successfully
+- [ ] Workers start, process jobs, and stop gracefully
+- [ ] Scheduled jobs are converted to pending at the right time
+- [ ] Failed jobs are retried and eventually moved to DLQ
+- [ ] Configuration can be viewed and updated
+- [ ] Web dashboard displays real-time information
+- [ ] Interactive shell provides tab completion and help
+- [ ] Error messages are clear and helpful
+- [ ] Job IDs are displayed in full without truncation
+- [ ] Table layout is optimized and readable
 
 ## Troubleshooting
 

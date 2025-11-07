@@ -85,12 +85,15 @@ def main_callback(
 
 
 @app.command()
-def enqueue(job_json: str = typer.Argument(..., help="Job JSON string")):
+def enqueue(
+    job_json: str = typer.Argument(..., help="Job JSON string"),
+    priority: Optional[int] = typer.Option(None, "--priority", "-p", help="Job priority (higher numbers = higher priority)")
+):
     """
     Add a new job to the queue.
     
-    Windows Example: queuectl enqueue "{\"id\":\"job1\",\"command\":\"echo Hello\"}"
-    Linux/Mac Example: queuectl enqueue '{"id":"job1","command":"echo Hello"}'
+    Windows Example: queuectl enqueue "{\"id\":\"job1\",\"command\":\"echo Hello\"}" --priority 10
+    Linux/Mac Example: queuectl enqueue '{"id":"job1","command":"echo Hello"}' --priority 10
     """
     try:
         # Handle Windows command line JSON parsing
@@ -110,6 +113,10 @@ def enqueue(job_json: str = typer.Argument(..., help="Job JSON string")):
         
         job_data = json.loads(job_json)
         
+        # Add priority from command line option if provided
+        if priority is not None:
+            job_data['priority'] = priority
+        
         # Validate required fields
         if "command" not in job_data:
             raise typer.BadParameter("Job must contain 'command' field")
@@ -117,6 +124,7 @@ def enqueue(job_json: str = typer.Argument(..., help="Job JSON string")):
         job = job_queue.enqueue(job_data)
         console.print(f"[green]OK[/green] Job enqueued: [bold]{job['id']}[/bold]")
         console.print(f"  Command: {job['command']}")
+        console.print(f"  Priority: {job['priority']}")
         console.print(f"  Max retries: {job['max_retries']}")
         
     except json.JSONDecodeError as e:
@@ -128,37 +136,7 @@ def enqueue(job_json: str = typer.Argument(..., help="Job JSON string")):
         raise typer.Exit(1)
 
 
-@app.command()
-def add(
-    command: str = typer.Argument(..., help="Command to run"),
-    job_id: str = typer.Option(None, "--id", help="Job ID (auto-generated if not provided)"),
-    priority: int = typer.Option(0, "--priority", help="Job priority (higher = first)"),
-    max_retries: int = typer.Option(3, "--retries", help="Maximum retry attempts")
-):
-    """
-    Add a simple job to the queue (easier than JSON).
-    
-    Example: queuectl add "echo Hello World" --id test1
-    """
-    try:
-        import uuid
-        
-        job_data = {
-            "id": job_id or f"job_{str(uuid.uuid4())[:8]}",
-            "command": command,
-            "priority": priority,
-            "max_retries": max_retries
-        }
-        
-        job = job_queue.enqueue(job_data)
-        console.print(f"[green]OK[/green] Job added: [bold]{job['id']}[/bold]")
-        console.print(f"  Command: {job['command']}")
-        console.print(f"  Priority: {job['priority']}")
-        console.print(f"  Max retries: {job['max_retries']}")
-        
-    except Exception as e:
-        console.print(f"[red]Error adding job:[/red] {e}")
-        raise typer.Exit(1)
+
 
 
 @worker_app.command("start")
@@ -249,11 +227,11 @@ def list_jobs(
         
         # Create jobs table
         table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("ID", style="cyan")
-        table.add_column("State", style="green")
-        table.add_column("Command", style="white")
-        table.add_column("Attempts", justify="center")
-        table.add_column("Created", style="dim")
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("State", style="green", width=10)
+        table.add_column("Command", style="white", max_width=30)
+        table.add_column("Tries", justify="center", width=6)
+        table.add_column("Created", style="dim", width=11)
         
         for job in jobs:
             # Color code states
@@ -266,7 +244,7 @@ def list_jobs(
             }.get(job['state'], 'white')
             
             attempts_str = f"{job['attempts']}/{job['max_retries']}"
-            created_str = job['created_at'][:19].replace('T', ' ')  # Format datetime
+            created_str = job['created_at'][5:16].replace('T', ' ')  # Format as MM-DD HH:MM
             
             table.add_row(
                 job['id'],
@@ -294,11 +272,11 @@ def list_dlq():
             return
         
         table = Table(title="Dead Letter Queue", show_header=True, header_style="bold red")
-        table.add_column("ID", style="cyan")
-        table.add_column("Command", style="white")
-        table.add_column("Attempts", justify="center")
-        table.add_column("Last Error", style="red")
-        table.add_column("Failed At", style="dim")
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Command", style="white", max_width=25)
+        table.add_column("Attempts", justify="center", width=8)
+        table.add_column("Last Error", style="red", max_width=30)
+        table.add_column("Failed At", style="dim", width=16)
         
         for job in jobs:
             error_preview = (job.get('error', 'Unknown error')[:40] + '...' 
@@ -370,7 +348,8 @@ def set_config(key: str = typer.Argument(..., help="Configuration key"),
         # Validate configuration keys
         valid_keys = ['max-retries', 'backoff-base']
         if key not in valid_keys:
-            console.print(f"[red]Error:[/red] Invalid config key. Valid keys: {', '.join(valid_keys)}")
+            console.print(f"[red]Error:[/red] Invalid config key")
+            console.print(f"[yellow]Valid keys:[/yellow] [cyan]{', '.join(valid_keys)}[/cyan]")
             raise typer.Exit(1)
         
         # Validate values
@@ -407,8 +386,8 @@ def get_config(key: str = typer.Argument(..., help="Configuration key")):
         valid_keys = ['max-retries', 'backoff-base']
         if key not in valid_keys:
             console.print(f"[red]'{key}' is not a valid config key[/red]")
-            console.print(f"[dim]Valid keys: {', '.join(valid_keys)}[/dim]")
-            console.print("[dim]Type 'config list' to see all available keys[/dim]")
+            console.print(f"[yellow]Valid keys:[/yellow] [cyan]{', '.join(valid_keys)}[/cyan]")
+            console.print("[yellow]Type[/yellow] [green]'config list'[/green] [yellow]to see all available keys[/yellow]")
             raise typer.Exit(1)
         
         value = config.get(key)
@@ -450,11 +429,6 @@ def list_config():
         console.print(f"[red]Error listing config:[/red] {e}")
         raise typer.Exit(1)
 
-
-@app.command("welcome")
-def show_welcome():
-    """Show the QueueCTL welcome screen and quick help"""
-    show_startup_screen()
 
 
 @app.command("shell")
@@ -513,7 +487,7 @@ def show_metrics(
         console.print(table)
         
         # Performance metrics
-        console.print(f"\n[#bbfa01]⚡ Performance:[/#bbfa01]")
+        console.print(f"\n[#bbfa01]Performance:[/#bbfa01]")
         console.print(f"  Average execution time: {metrics['avg_execution_time_ms']:.0f}ms")
         console.print(f"  Jobs per hour: {metrics['jobs_per_hour']:.1f}")
         console.print(f"  Success rate: {metrics['success_rate_percent']:.1f}%")
@@ -522,33 +496,6 @@ def show_metrics(
         console.print(f"[red]Error getting metrics:[/red] {e}")
         raise typer.Exit(1)
 
-
-@app.command("schedule")
-def schedule_job(
-    job_json: str = typer.Argument(..., help="Job JSON string"),
-    run_at: str = typer.Option(None, "--at", help="When to run (ISO format or +5m, +1h, etc.)")
-):
-    """Schedule a job to run at a specific time"""
-    try:
-        job_data = json.loads(job_json.strip().strip("'\""))
-        
-        if run_at:
-            job_data['run_at'] = run_at
-        
-        job = job_queue.enqueue(job_data)
-        
-        if job['state'] == 'scheduled':
-            console.print(f"[green]OK[/green] Job scheduled: [bold]{job['id']}[/bold]")
-            console.print(f"  Will run at: {job['run_at']}")
-        else:
-            console.print(f"[green]OK[/green] Job enqueued: [bold]{job['id']}[/bold]")
-        
-        console.print(f"  Command: {job['command']}")
-        console.print(f"  Priority: {job['priority']}")
-        
-    except Exception as e:
-        console.print(f"[red]Error scheduling job:[/red] {e}")
-        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

@@ -47,47 +47,37 @@ def show_banner():
 
 
 def show_quick_help():
-    """Show quick help for new users"""
-    
-    # Quick start commands
-    quick_start = Table(show_header=True, header_style="#bbfa01 bold", border_style="#bbfa01")
-    quick_start.add_column("Quick Start", style="#bbfa01")
-    quick_start.add_column("Command", style="white")
-    
-    quick_start.add_row("Interactive shell", "queuectl shell  (or queuectl -i)")
-    quick_start.add_row("Add a job", 'queuectl enqueue "{\\"id\\":\\"test\\",\\"command\\":\\"echo hello\\"}"')
-    quick_start.add_row("Start workers", "queuectl worker start --count 2")
-    quick_start.add_row("Check status", "queuectl status")
-    quick_start.add_row("List jobs", "queuectl list")
+    """Show command help for users"""
     
     # Main commands
     commands = Table(show_header=True, header_style="#bbfa01 bold", border_style="#bbfa01")
     commands.add_column("Command", style="#bbfa01")
     commands.add_column("Description", style="white")
     
-    commands.add_row("enqueue <json>", "Add job to queue")
-    commands.add_row("schedule <json>", "Schedule job with priority/timing")
+    commands.add_row("enqueue <json>", "Add job to queue with scheduling/priority")
     commands.add_row("worker start/stop", "Manage worker processes")
-    commands.add_row("status", "Show system status")
-    commands.add_row("list [--state]", "List jobs (all or by state)")
-    commands.add_row("metrics", "Show performance metrics")
+    commands.add_row("scheduler start/stop", "Manage scheduler daemon")
+    commands.add_row("status", "Show system status with job counts")
+    commands.add_row("list [--state]", "List jobs with full IDs (pending/dead/scheduled)")
+    commands.add_row("metrics", "Show performance metrics and statistics")
     commands.add_row("dashboard", "Start web monitoring dashboard")
     commands.add_row("dlq list/retry", "Dead Letter Queue management")
     commands.add_row("config set/get", "Configuration management")
+    commands.add_row("shell", "Interactive shell mode")
     
-    console.print(quick_start)
-    console.print()
     console.print(commands)
     console.print()
     
     # Enhanced Features Panel
     features_text = (
-        "[#bbfa01]New Features:[/#bbfa01]\n"
+        "[#bbfa01]Recent Improvements:[/#bbfa01]\n"
+        "• Full Job IDs: Complete job IDs displayed in all list commands\n"
+        "• Compact Display: Optimized table layout (Tries/Created columns)\n"
+        "• Enhanced Errors: Colored error messages with helpful suggestions\n"
+        "• Scheduler Daemon: Background processing for scheduled jobs\n"
+        "• Priority Queues: Set 'priority' field (higher = processed first)\n"
+        "• Scheduled Jobs: Use 'run_at' field (+30s, +5m, ISO format)\n"
         "• Web Dashboard: [bold]queuectl dashboard[/bold] (http://localhost:8080)\n"
-        "• Scheduled Jobs: Add 'run_at' field or use [bold]queuectl schedule[/bold]\n"
-        "• Priority Queues: Set 'priority' field (higher = first)\n"
-        "• Job Timeouts: Set 'timeout_seconds' field\n"
-        "• Metrics: [bold]queuectl metrics[/bold] for performance stats\n"
         "• Interactive Shell: [bold]queuectl shell[/bold] for easier usage"
     )
     
