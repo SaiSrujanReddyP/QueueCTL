@@ -324,10 +324,38 @@ def list_dlq():
 
 @dlq_app.command("retry")
 def retry_dlq_job(job_id: str = typer.Argument(..., help="Job ID to retry")):
-    """Retry a job from Dead Letter Queue"""
+    """Retry a job from Dead Letter Queue (supports partial ID matching)"""
     try:
-        job_queue.retry_from_dlq(job_id)
-        console.print(f"[green]OK[/green] Job [bold]{job_id}[/bold] moved back to pending queue")
+        # First try exact match
+        try:
+            job_queue.retry_from_dlq(job_id)
+            console.print(f"[green]OK[/green] Job [bold]{job_id}[/bold] moved back to pending queue")
+            return
+        except ValueError:
+            # If exact match fails, try partial matching
+            pass
+        
+        # Find jobs that match the partial ID
+        dlq_jobs = job_queue.list_jobs(state='dead')
+        matching_jobs = [job for job in dlq_jobs if job_id in job['id']]
+        
+        if not matching_jobs:
+            console.print(f"[red]Error:[/red] No DLQ job found matching '{job_id}'")
+            console.print("[dim]Use 'dlq list' to see available jobs[/dim]")
+            raise typer.Exit(1)
+        elif len(matching_jobs) == 1:
+            # Exactly one match - retry it
+            full_job_id = matching_jobs[0]['id']
+            console.print(f"[dim]Found matching job: {full_job_id}[/dim]")
+            job_queue.retry_from_dlq(full_job_id)
+            console.print(f"[green]OK[/green] Job [bold]{full_job_id}[/bold] moved back to pending queue")
+        else:
+            # Multiple matches - show options
+            console.print(f"[yellow]Multiple jobs match '{job_id}':[/yellow]")
+            for i, job in enumerate(matching_jobs, 1):
+                console.print(f"  {i}. {job['id']}")
+            console.print("[dim]Please use a more specific job ID[/dim]")
+            raise typer.Exit(1)
         
     except Exception as e:
         console.print(f"[red]Error retrying job:[/red] {e}")
@@ -375,9 +403,19 @@ def set_config(key: str = typer.Argument(..., help="Configuration key"),
 def get_config(key: str = typer.Argument(..., help="Configuration key")):
     """Get configuration value"""
     try:
+        # Validate configuration key
+        valid_keys = ['max-retries', 'backoff-base']
+        if key not in valid_keys:
+            console.print(f"[red]'{key}' is not a valid config key[/red]")
+            console.print(f"[dim]Valid keys: {', '.join(valid_keys)}[/dim]")
+            console.print("[dim]Type 'config list' to see all available keys[/dim]")
+            raise typer.Exit(1)
+        
         value = config.get(key)
         console.print(f"[cyan]{key}[/cyan] = [bold]{value}[/bold]")
         
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error getting config:[/red] {e}")
         raise typer.Exit(1)
