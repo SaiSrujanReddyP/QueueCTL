@@ -225,36 +225,139 @@ def list_jobs(
                 console.print("[yellow]No jobs found[/yellow]")
             return
         
-        # Create jobs table
+        # Check if we're showing scheduled jobs specifically
+        has_scheduled_jobs = any(job['state'] == 'scheduled' for job in jobs)
+        showing_only_scheduled = state == 'scheduled'
+        
+        # Create compact jobs table
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("ID", style="cyan", no_wrap=True)
-        table.add_column("State", style="green", width=10)
-        table.add_column("Command", style="white", max_width=30)
-        table.add_column("Tries", justify="center", width=6)
-        table.add_column("Created", style="dim", width=11)
+        table.add_column("St", style="green", width=3)  # Compressed State
+        table.add_column("Command", style="white")  # Let it expand
+        table.add_column("T", justify="center", width=3)  # Compressed Tries
+        
+        if showing_only_scheduled:
+            # For scheduled jobs only, show run_at time
+            table.add_column("Scheduled", style="yellow", width=8)
+        elif has_scheduled_jobs:
+            # Mixed jobs, show both created and scheduled times
+            table.add_column("Created", style="dim", width=8)
+            table.add_column("Scheduled", style="yellow", width=8)
+        else:
+            # No scheduled jobs, just show created time
+            table.add_column("Created", style="dim", width=8)
         
         for job in jobs:
-            # Color code states
-            state_color = {
-                'pending': 'yellow',
-                'processing': 'blue',
-                'completed': 'green',
-                'failed': 'red',
-                'dead': 'red bold'
-            }.get(job['state'], 'white')
+            # Color code states with abbreviations
+            state_abbrev = {
+                'pending': ('P', 'yellow'),
+                'processing': ('R', 'blue'),  # Running
+                'completed': ('C', 'green'),
+                'failed': ('F', 'red'),
+                'dead': ('D', 'red bold'),
+                'scheduled': ('S', 'yellow')
+            }
             
-            attempts_str = f"{job['attempts']}/{job['max_retries']}"
-            created_str = job['created_at'][5:16].replace('T', ' ')  # Format as MM-DD HH:MM
+            state_short, state_color = state_abbrev.get(job['state'], (job['state'][:1].upper(), 'white'))
             
-            table.add_row(
-                job['id'],
-                f"[{state_color}]{job['state']}[/{state_color}]",
-                job['command'][:50] + ('...' if len(job['command']) > 50 else ''),
-                attempts_str,
-                created_str
-            )
+            # Compact tries format (just the numbers)
+            tries_str = f"{job['attempts']}/{job['max_retries']}"
+            
+            # Multi-line date/time format
+            def format_datetime_compact(dt_str):
+                if not dt_str:
+                    return "-"
+                # Extract date and time parts
+                date_part = dt_str[5:10]  # MM-DD
+                time_part = dt_str[11:16]  # HH:MM
+                return f"{date_part}\n{time_part}"
+            
+            # Multi-line command format for better space usage
+            def format_command_multiline(cmd, max_width=50):
+                if len(cmd) <= max_width:
+                    return cmd
+                
+                # Try to break at word boundaries
+                words = cmd.split()
+                lines = []
+                current_line = ""
+                
+                for word in words:
+                    if len(current_line + " " + word) <= max_width:
+                        current_line += (" " + word) if current_line else word
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word
+                
+                if current_line:
+                    lines.append(current_line)
+                
+                # Limit to 2 lines max
+                if len(lines) > 2:
+                    lines = lines[:2]
+                    lines[1] = lines[1][:max_width-3] + "..."
+                
+                return "\n".join(lines)
+            
+            created_compact = format_datetime_compact(job['created_at'])
+            
+            if showing_only_scheduled:
+                # Show only scheduled time for scheduled jobs
+                if job.get('run_at'):
+                    scheduled_compact = format_datetime_compact(job['run_at'])
+                else:
+                    scheduled_compact = "-\n-"
+                
+                table.add_row(
+                    job['id'],
+                    f"[{state_color}]{state_short}[/{state_color}]",
+                    format_command_multiline(job['command']),
+                    tries_str,
+                    scheduled_compact
+                )
+            elif has_scheduled_jobs:
+                # Show both created and scheduled times
+                if job.get('run_at'):
+                    scheduled_compact = format_datetime_compact(job['run_at'])
+                else:
+                    scheduled_compact = "-\n-"
+                
+                table.add_row(
+                    job['id'],
+                    f"[{state_color}]{state_short}[/{state_color}]",
+                    format_command_multiline(job['command']),
+                    tries_str,
+                    created_compact,
+                    scheduled_compact
+                )
+            else:
+                # Show only created time
+                table.add_row(
+                    job['id'],
+                    f"[{state_color}]{state_short}[/{state_color}]",
+                    format_command_multiline(job['command']),
+                    tries_str,
+                    created_compact
+                )
         
         console.print(table)
+        
+        # Add state legend
+        console.print(f"\n[dim]State Legend: [yellow]P[/yellow]=Pending, [blue]R[/blue]=Running, [green]C[/green]=Completed, [red]F[/red]=Failed, [red bold]D[/red bold]=Dead, [yellow]S[/yellow]=Scheduled[/dim]")
+        
+        # Add state-specific information
+        if state:
+            state_info = {
+                'pending': 'Jobs ready to be processed by workers',
+                'processing': 'Jobs currently being executed',
+                'completed': 'Jobs that finished successfully',
+                'failed': 'Jobs that failed but will be retried',
+                'dead': 'Jobs that failed permanently (Dead Letter Queue)',
+                'scheduled': 'Jobs waiting for their scheduled time'
+            }
+            if state in state_info:
+                console.print(f"[dim]Showing {state} jobs: {state_info[state]}[/dim]")
         
     except Exception as e:
         console.print(f"[red]Error listing jobs:[/red] {e}")

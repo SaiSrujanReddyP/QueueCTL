@@ -154,6 +154,12 @@ class SchedulerDaemon:
         
         while self.running:
             try:
+                # Check for stop file
+                if os.path.exists("scheduler_daemon.stop"):
+                    self.log("Stop file detected, shutting down...")
+                    os.remove("scheduler_daemon.stop")
+                    break
+                
                 # Get current job status
                 counts = self.get_job_counts()
                 

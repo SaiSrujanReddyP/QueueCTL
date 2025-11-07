@@ -221,13 +221,13 @@ class QueueCTLShell(cmd.Cmd):
                 console.print(result.stdout)
                 
                 # Show filtering tip
-                console.print(f"\n[dim]💡 Filter by job type:[/dim]")
+                console.print(f"\n[dim] Filter by job type:[/dim]")
                 console.print(f"[dim]  list --state pending     - Show only pending jobs[/dim]")
                 console.print(f"[dim]  list --state processing  - Show only processing jobs[/dim]")
                 console.print(f"[dim]  list --state completed   - Show only completed jobs[/dim]")
                 console.print(f"[dim]  list --state failed      - Show only failed jobs[/dim]")
                 console.print(f"[dim]  list --state dead        - Show only dead letter queue jobs[/dim]")
-                console.print(f"[dim]  list --state scheduled   - Show only scheduled jobs[/dim]")
+                console.print(f"[dim]  list --state scheduled   - Show scheduled jobs with run times[/dim]")
             else:
                 console.print("[red]No output from list command[/red]")
     
@@ -310,9 +310,20 @@ class QueueCTLShell(cmd.Cmd):
             
             # Try to find and stop the daemon process
             try:
+                import os
+                
                 if os.name == 'nt':  # Windows
-                    # Use taskkill to stop scheduler processes
-                    subprocess.run('taskkill /f /im python.exe /fi "WINDOWTITLE eq scheduler_daemon*"', shell=True, capture_output=True)
+                    # Use wmic to find and kill scheduler processes
+                    result = subprocess.run('wmic process where "commandline like \'%scheduler_daemon.py%\'" get processid /value', 
+                                          shell=True, capture_output=True, text=True)
+                    
+                    # Extract PIDs and kill them
+                    for line in result.stdout.split('\n'):
+                        if 'ProcessId=' in line:
+                            pid = line.split('=')[1].strip()
+                            if pid and pid.isdigit():
+                                subprocess.run(f'taskkill /f /pid {pid}', shell=True, capture_output=True)
+                                console.print(f"[dim]Killed scheduler process PID: {pid}[/dim]")
                 else:  # Unix/Linux
                     # Use pkill to stop scheduler processes
                     subprocess.run("pkill -f scheduler_daemon.py", shell=True, capture_output=True)
@@ -320,7 +331,16 @@ class QueueCTLShell(cmd.Cmd):
                 # Also stop any workers
                 subprocess.run("python queuectl.py worker stop", shell=True, capture_output=True)
                 
+                # Create stop file as fallback
+                try:
+                    with open("scheduler_daemon.stop", "w") as f:
+                        f.write("stop")
+                    console.print("[dim]Created stop file for graceful shutdown[/dim]")
+                except:
+                    pass
+                
                 console.print("[green]✓ Scheduler daemon stopped[/green]")
+                console.print("[dim]If daemon is still running, it will stop within 5 seconds[/dim]")
                 
             except Exception as e:
                 console.print(f"[red]Error stopping daemon: {e}[/red]")

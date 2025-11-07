@@ -6,7 +6,7 @@
 ██    ██ ██    ██ █████   ██    ██ █████   ██         ██    ██      
 ██ ▄▄ ██ ██    ██ ██      ██    ██ ██      ██         ██    ██      
  ██████   ██████  ███████  ██████  ███████  ██████    ██    ███████ 
-    ▀▀                                                              
+   ▀▀                                                              
                                 v1.0.0
                 CLI-based Background Job Queue System
 ```
@@ -49,13 +49,16 @@ QueueCTL is a robust, production-ready job queue system built with Python. It pr
 
 ### Installation
 
-1. **Clone or download the project:**
+1. **Clone the repository:**
    ```bash
-   # If using git
-   git clone <repository-url>
-   cd queuectl
-   
-   # Or download and extract the ZIP file
+   git clone https://github.com/SaiSrujanReddyP/QueueCTL.git
+   cd QueueCTL
+   ```
+
+   **Or download ZIP:**
+   ```bash
+   # Download ZIP from GitHub, extract files, then:
+   cd QueueCTL
    ```
 
 2. **Install dependencies:**
@@ -63,48 +66,225 @@ QueueCTL is a robust, production-ready job queue system built with Python. It pr
    pip install -r requirements.txt
    ```
 
-3. **Verify installation:**
+3. **Start QueueCTL:**
    ```bash
-   python queuectl.py --help
+   python queuectl.py
    ```
 
-### Quick Setup (Alternative)
-```bash
-# Run the setup script
-python setup.py
+   This will start an **interactive terminal** where you can use commands directly without the `python queuectl.py` prefix.
 
-# Or install manually
-pip install typer rich sqlite3 flask requests
-```## Quick Start
+4. **Get started:**
+   ```bash
+   # In the interactive shell, type:
+   help
+   
+   # Try the demo:
+   demo
+   
+   # Check the README for more examples
+   ```
 
-### 1. First Run - See the ASCII Art
+## Project Structure
+
+QueueCTL follows a modular architecture with clear separation of concerns:
+
+```
+QueueCTL/
+├── src/                             # Core application modules
+│   ├── __init__.py                  # Package initialization
+│   ├── job_queue.py                 # Job queue implementation with SQLite persistence
+│   ├── worker_manager.py            # Worker process management and coordination
+│   ├── worker.py                    # Individual worker implementation for job processing
+│   ├── scheduler_daemon.py          # Background daemon for scheduled job management
+│   ├── config.py                    # Configuration management and persistence
+│   ├── web_dashboard.py             # Real-time web monitoring interface
+│   ├── interactive_shell.py         # Interactive CLI with tab completion
+│   └── banner.py                    # ASCII art banner and startup screen
+│
+├── locks/                           # Job locking directory (auto-created)
+│   └── *.lock                       # Worker coordination lock files
+│
+├── .vscode/                         # VS Code configuration
+│   └── settings.json                # Editor settings and preferences
+│
+├── queuectl.py                      # Main CLI entry point and command interface
+├── jobs.db                          # SQLite database (auto-created)
+├── requirements.txt                 # Python dependencies
+├── setup.py                         # Package installation configuration
+├── Makefile                         # Build and development commands
+├── design.md                        # Architecture and design documentation
+├── README.md                        # This comprehensive guide
+├── .gitignore                       # Git ignore patterns
+│
+├── test_deliverables.py             # Core functionality test suite
+├── test_bonus_features.py           # Advanced features test suite
+├── submission_checklist.py          # Project validation checklist
+├── DELIVERABLES_CHECKLIST.md        # Requirements verification document
+│
+└── queuectl-easy.bat                # Windows batch file for easy startup
+```
+
+### Core Modules Description
+
+#### **src/job_queue.py**
+- **Purpose**: Central job management and persistence layer
+- **Key Features**: SQLite database operations, job state management, priority queues
+- **Responsibilities**: Job CRUD operations, metrics collection, database schema management
+- **Database Tables**: `jobs`, `job_metrics`, `system_metrics`
+
+#### **src/worker_manager.py**
+- **Purpose**: Worker process lifecycle management
+- **Key Features**: Process spawning, health monitoring, graceful shutdown
+- **Responsibilities**: Start/stop workers, process coordination, resource cleanup
+- **Platform Support**: Windows (subprocess) and Unix (multiprocessing) compatibility
+
+#### **src/worker.py**
+- **Purpose**: Individual job processing and execution
+- **Key Features**: Command execution, I/O capture, timeout handling, retry logic
+- **Responsibilities**: Job fetching, subprocess management, error handling, metrics reporting
+- **Isolation**: Each worker runs in separate process for fault tolerance
+
+#### **src/scheduler_daemon.py**
+- **Purpose**: Background daemon for scheduled job management
+- **Key Features**: Time-based job conversion, automatic worker management (optional)
+- **Responsibilities**: Monitor scheduled jobs, convert to pending, daemon lifecycle
+- **Operation Modes**: Manual (user controls workers) or Auto (daemon manages workers)
+
+#### **src/config.py**
+- **Purpose**: Configuration management and persistence
+- **Key Features**: SQLite-backed settings, default values, runtime updates
+- **Responsibilities**: Get/set configuration, validation, persistent storage
+- **Settings**: `max-retries`, `backoff-base`, timeout values
+
+#### **src/web_dashboard.py**
+- **Purpose**: Real-time web monitoring interface
+- **Key Features**: HTTP server, REST API, real-time job status, metrics visualization
+- **Responsibilities**: Serve dashboard HTML, provide JSON APIs, handle web requests
+- **Endpoints**: `/`, `/api/status`, `/api/jobs`, `/api/metrics`
+
+#### **src/interactive_shell.py**
+- **Purpose**: Interactive command-line interface
+- **Key Features**: Tab completion, command history, rich formatting, help system
+- **Responsibilities**: Command parsing, user interaction, output formatting
+- **Commands**: All QueueCTL operations available in interactive mode
+
+#### **src/banner.py**
+- **Purpose**: Startup experience and branding
+- **Key Features**: ASCII art banner, welcome messages, version display
+- **Responsibilities**: Visual presentation, startup screen, branding elements
+
+### Main Entry Points
+
+#### **queuectl.py**
+- **Purpose**: Main CLI application and command router
+- **Key Features**: Typer-based CLI, rich formatting, command organization
+- **Responsibilities**: Command parsing, argument validation, component coordination
+- **Commands**: `enqueue`, `list`, `status`, `worker`, `dlq`, `config`, `dashboard`, `metrics`
+
+#### **jobs.db**
+- **Purpose**: SQLite database for persistent storage
+- **Auto-created**: Generated on first run with proper schema
+- **Tables**: Jobs, metrics, configuration, system data
+- **ACID Compliance**: Reliable data persistence with transaction support
+
+### Testing and Validation
+
+#### **test_deliverables.py**
+- **Purpose**: Core functionality validation
+- **Coverage**: Job processing, worker management, basic operations
+- **Usage**: `python test_deliverables.py`
+
+#### **test_bonus_features.py**
+- **Purpose**: Advanced features testing
+- **Coverage**: Scheduling, priorities, DLQ, web dashboard, metrics
+- **Usage**: `python test_bonus_features.py`
+
+#### **submission_checklist.py**
+- **Purpose**: Automated project validation
+- **Coverage**: File structure, dependencies, functionality checks
+- **Usage**: Validates project completeness and requirements
+
+### Development Files
+
+#### **requirements.txt**
+```
+typer>=0.9.0          # CLI framework with rich formatting
+rich>=13.0.0          # Terminal formatting and tables
+```
+
+#### **setup.py**
+- **Purpose**: Package installation and distribution
+- **Features**: Entry points, dependencies, metadata
+- **Usage**: `pip install -e .` for development installation
+
+#### **Makefile**
+- **Purpose**: Development automation and build commands
+- **Commands**: Testing, linting, packaging, deployment helpers
+- **Usage**: `make test`, `make clean`, `make install`
+
+#### **queuectl-easy.bat**
+- **Purpose**: Windows convenience launcher
+- **Features**: One-click startup for Windows users
+- **Usage**: Double-click to start QueueCTL interactive shell
+
+### Runtime Directories
+
+#### **locks/**
+- **Purpose**: Worker coordination and job locking
+- **Auto-created**: Generated when workers start
+- **Contents**: `<job_id>.lock` files for preventing duplicate processing
+- **Cleanup**: Automatically cleaned on worker shutdown
+
+#### **.vscode/**
+- **Purpose**: VS Code editor configuration
+- **Contents**: Python interpreter settings, debugging configuration
+- **Optional**: Only needed for development in VS Code
+
+This modular structure ensures clean separation of concerns, making the codebase maintainable, testable, and extensible. Each module has a single responsibility and well-defined interfaces for interaction with other components.
+
+## Quick Start
+
+### 1. Start QueueCTL Interactive Shell
 ```bash
 python queuectl.py
 ```
-This displays the beautiful ASCII banner and automatically starts the interactive shell.
+This displays the beautiful ASCII banner and starts the interactive shell where you can use commands directly.
 
 ### 2. Add Your First Job
 ```bash
-# Easy way (recommended for beginners)
-python queuectl.py add "echo Hello World" --id my-first-job
-
-# Advanced way with JSON
-python queuectl.py enqueue '{"id":"test","command":"echo Hello","priority":5}'
+# In the interactive shell:
+queuectl> enqueue {"id":"hello","command":"echo Hello World"}
+✓ Job added successfully: hello
 ```
 
 ### 3. Start Workers
 ```bash
-python queuectl.py worker start --count 2
+queuectl> worker start --count 2
+Starting 2 worker processes...
+✓ Started worker worker_123_0 (PID: 1234)
+✓ Started worker worker_123_1 (PID: 1235)
 ```
 
 ### 4. Check Status
 ```bash
-python queuectl.py status
+queuectl> status
+# Shows system status with job counts and worker information
 ```
 
-### 5. View Jobs
+### 5. View Jobs with Enhanced Display
 ```bash
-python queuectl.py list
+queuectl> list
+# Shows jobs with state legend and multi-line commands
+State Legend: P=Pending, R=Running, C=Completed, F=Failed, D=Dead, S=Scheduled
+```
+
+### 6. Get Help
+```bash
+queuectl> help
+# Shows all available commands
+
+queuectl> help enqueue
+# Shows specific command help
 ```
 
 ## Usage Examples
@@ -173,9 +353,9 @@ QueueCTL follows a modular architecture with clear separation of concerns:
 │  │  │ • Priority      │    │   Scheduled     │    │ • Status │ │ │
 │  │  │   Handling      │    │   → Pending     │    │ • Scale  │ │ │
 │  │  └─────────────────┘    │ • Manual/Auto   │    └──────────┘ │ │
-│  │           │              │   Mode          │         │      │ │
-│  │           │              └─────────────────┘         │      │ │
-│  │           │                       │                  │      │ │
+│  │           │             │   Mode          │         │       │ │
+│  │           │             └─────────────────┘         │       │ │
+│  │           │                       │                 │       │ │
 │  │  ┌─────────────────────────────────┼──────────────────┼──────┐ │ │
 │  │  │                    Database Layer                       │ │ │
 │  │  │                                 │                  │    │ │ │
@@ -202,7 +382,7 @@ QueueCTL follows a modular architecture with clear separation of concerns:
 │  │  │ • Execute│  │ • Execute│  │ • Execute│  │ • Execute│    │ │
 │  │  │ • Report │  │ • Report │  │ • Report │  │ • Report │    │ │
 │  │  │ • Retry  │  │ • Retry  │  │ • Retry  │  │ • Retry  │    │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │ │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -348,26 +528,15 @@ QueueCTL supports delayed job execution with flexible scheduling:
 
 **Using relative time:**
 ```bash
-queuectl> schedule "backup database" "+1h"
-queuectl> schedule "send report" "+30m"
-queuectl> schedule "cleanup logs" "+1d"
+queuectl> enqueue {"id":"backup_job","command":"backup database","run_at":"+1h"}
+queuectl> enqueue {"id":"report_job","command":"send report","run_at":"+30m"}
+queuectl> enqueue {"id":"cleanup_job","command":"cleanup logs","run_at":"+1d"}
 ```
-
-**Using absolute time:**
-```bash
-queuectl> schedule "daily backup" "2025-11-10 02:00:00"
-```
-
 ### Viewing Scheduled Jobs
 
 **List all scheduled jobs:**
 ```bash
-queuectl> scheduled
-```
-
-**View all jobs (including scheduled):**
-```bash
-queuectl> list
+queuectl> list --state scheduled
 ```
 
 ### How Scheduled Jobs Work
@@ -377,51 +546,97 @@ queuectl> list
 3. **Conversion**: When time arrives, jobs automatically become `pending`
 4. **Processing**: Pending jobs are processed by active workers
 5. **Completion**: Jobs move to `completed`, `failed`, or `dead` states
-## Inter
-active Shell Commands
+## Interactive Shell Commands
 
-QueueCTL provides a rich interactive shell with tab completion and command history:
+QueueCTL provides a rich interactive shell with tab completion and command history. When you run `python queuectl.py`, you enter this interactive mode where you can use commands directly.
 
-### Job Management
+### Current Available Commands
+
+**Core Job Management:**
 ```bash
-queuectl> enqueue {"id":"test","command":"echo hello"}     # Add simple job
-queuectl> enqueue {"id":"backup","command":"backup","run_at":"+1h"}  # Schedule job
-queuectl> list                                            # List all jobs (full IDs)
-queuectl> list --state pending                            # Filter by state
-queuectl> list --state scheduled                          # Show only scheduled jobs
+enqueue <json>          # Add job to queue with scheduling/priority
+list [--state <state>]  # List jobs with full IDs and multi-line commands  
+status                  # Show system status with job counts
+dlq list                # List Dead Letter Queue jobs
+dlq retry <job_id>      # Retry failed job from DLQ
 ```
 
-### Worker Management
+**Worker & Scheduler Management:**
 ```bash
-queuectl> worker start --count 2              # Start 2 workers
-queuectl> worker stop                         # Stop all workers
-queuectl> worker status                       # Check worker status
+worker start --count N  # Start N worker processes
+worker stop             # Stop all workers
+scheduler start         # Start scheduler daemon (manual mode)
+scheduler stop          # Stop scheduler daemon
+stop_workers           # Stop all workers with final status
 ```
 
-### Scheduler Management
+**System Information & Configuration:**
 ```bash
-queuectl> scheduler start --workers 2         # Start scheduler (manual mode)
-queuectl> scheduler start --workers 2 --auto  # Start scheduler (auto mode)
-queuectl> scheduler status                    # Check scheduler status
-queuectl> scheduler logs                      # View scheduler logs
-queuectl> scheduler stop                      # Stop scheduler
+config list             # Show all configuration settings
+config get <key>        # Get configuration value
+config set <key> <value># Set configuration value
+metrics                 # Show performance metrics and statistics
+time                   # Show current time (local/UTC)
 ```
 
-### System Information
+**Web Dashboard:**
 ```bash
-queuectl> status                              # System status
-queuectl> time                                # Current time (local/UTC)
-queuectl> metrics                             # Performance metrics
-queuectl> config                              # Configuration settings
+dashboard              # Start web monitoring dashboard
+dashboard_stop         # Stop web dashboard
 ```
 
-### Utility Commands
+**Testing & Demo:**
 ```bash
-queuectl> demo                                # Add demo jobs for testing
-queuectl> help                                # Show all commands
-queuectl> time                                # Show current time (local/UTC)
-queuectl> exit                                # Exit shell
+demo                   # Add demo jobs for testing
+test_deliverables      # Test core functionality
+test_bonus_features    # Test advanced features  
+verify_all             # Complete system verification
 ```
+
+**Utility Commands:**
+```bash
+help [<command>]       # Show help for commands
+clear                  # Clear screen and show banner
+banner                 # Show QueueCTL ASCII banner
+exit                   # Exit interactive shell
+```
+
+**Recent UI Improvements:**
+- **State Legend**: Shows what P, R, C, F, D, S mean after each list command
+- **Multi-line Commands**: Long commands wrap to next line for full visibility
+- **Compact Layout**: Optimized column widths (St=3, T=3, dates=8 chars)
+- **Smart Filtering**: State-specific help text for filtered lists
+
+**Example Enhanced Output:**
+```bash
+queuectl> list --state scheduled
+
+┌─────────────────────┬────┬─────────────────────────────────────┬───┬──────────┐
+│ ID                  │ St │ Command                             │ T │ Scheduled│
+├─────────────────────┼────┼─────────────────────────────────────┼───┼──────────┤
+│ backup_job_123      │ S  │ backup database --full --compress   │0/3│ 11-10    │
+│                     │    │ --encrypt --output /backups/daily   │   │ 02:00    │
+└─────────────────────┴────┴─────────────────────────────────────┴───┴──────────┘
+
+State Legend: P=Pending, R=Running, C=Completed, F=Failed, D=Dead, S=Scheduled
+Showing scheduled jobs: Jobs waiting for their scheduled time
+```
+
+### Getting Started in Interactive Shell
+
+1. **Start QueueCTL**: `python queuectl.py`
+2. **Get help**: `help` (shows all commands)
+3. **Try demo**: `demo` (adds sample jobs)
+4. **Start workers**: `worker start --count 2`
+5. **Check status**: `status`
+6. **List jobs**: `list` (with enhanced display)
+7. **Exit**: `exit`
+
+**Pro Tips:**
+- Use `help <command>` for specific command help
+- All commands have tab completion
+- No need for `python queuectl.py` prefix in interactive mode
+- Commands show helpful legends and state information
 
 ## User Interface Enhancements
 
@@ -871,8 +1086,7 @@ python queuectl.py shell                      # Start interactive shell
 
 **Job Management:**
 ```bash
-python queuectl.py add "command" --id job_id  # Add job
-python queuectl.py list                       # List jobs
+python queuectl.py enqueue '{"id":"job_id","command":"command"}'  # Add job
 python queuectl.py list --state pending       # Filter by state
 ```
 
@@ -887,7 +1101,7 @@ python queuectl.py worker status              # Worker status
 ```bash
 python queuectl.py status                     # System status
 python queuectl.py metrics                    # Performance metrics
-python queuectl.py config show                # Show configuration
+python queuectl.py config list                # Show configuration
 ```
 
 ## Contributing
