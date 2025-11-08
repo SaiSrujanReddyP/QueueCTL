@@ -199,6 +199,19 @@ class QueueCTLShell(cmd.Cmd):
         counts = self._get_job_counts()
         self._display_job_counts(counts)
         
+        # Show scheduled jobs if any
+        scheduled_jobs = self._get_scheduled_jobs_info()
+        if scheduled_jobs:
+            console.print(f"\n[yellow]⏰ Scheduled Jobs:[/yellow]")
+            for job in scheduled_jobs[:3]:  # Show first 3
+                wait_str = self._format_wait_time(job['wait_seconds'])
+                if wait_str == "ready now":
+                    console.print(f"[dim]• {job['id']}: {wait_str}[/dim]")
+                else:
+                    console.print(f"[dim]• {job['id']}: ready in {wait_str}[/dim]")
+            if len(scheduled_jobs) > 3:
+                console.print(f"[dim]... and {len(scheduled_jobs) - 3} more scheduled jobs[/dim]")
+        
         # Show worker status
         console.print(f"\n[yellow]Worker Status:[/yellow]")
         worker_result = subprocess.run("python queuectl.py worker status", shell=True, capture_output=True, text=True)
@@ -206,7 +219,7 @@ class QueueCTLShell(cmd.Cmd):
             console.print(worker_result.stdout)
         else:
             console.print("[dim]No workers currently running[/dim]")
-            console.print("[dim]Use 'auto_worker start' to start persistent background workers[/dim]")
+            console.print("[dim]Use 'worker start' to process jobs[/dim]")
     
     def do_list(self, arg):
         """List jobs with enhanced display
@@ -231,184 +244,21 @@ class QueueCTLShell(cmd.Cmd):
             else:
                 console.print("[red]No output from list command[/red]")
     
-    def do_scheduler(self, arg):
-        """Control the scheduler daemon for scheduled job management
-        Usage: 
-          scheduler start [--workers N] [--auto] - Start scheduler daemon
-          scheduler stop                          - Stop scheduler daemon
-          scheduler status                        - Check scheduler daemon status
-          scheduler logs                          - Show recent scheduler logs
-        """
-        if not arg.strip():
-            console.print("[yellow]Scheduler daemon commands:[/yellow]")
-            console.print("  scheduler start [--workers N] [--auto] - Start scheduler daemon")
-            console.print("  scheduler stop                          - Stop scheduler daemon") 
-            console.print("  scheduler status                        - Check scheduler daemon status")
-            console.print("  scheduler logs                          - Show recent scheduler logs")
-            console.print("\n[dim]The scheduler daemon:[/dim]")
-            console.print("[dim]• Converts scheduled jobs to pending when their time arrives[/dim]")
-            console.print("[dim]• Manual mode (default): You control workers with 'worker start/stop'[/dim]")
-            console.print("[dim]• Auto mode (--auto): Automatically manages workers[/dim]")
-            return
-        
-        parts = arg.strip().split()
-        command = parts[0]
-        
-        if command == "start":
-            workers = 2  # default
-            auto_mode = False
-            
-            if "--workers" in parts:
-                try:
-                    workers_idx = parts.index("--workers")
-                    if workers_idx + 1 < len(parts):
-                        workers = int(parts[workers_idx + 1])
-                except (ValueError, IndexError):
-                    workers = 2
-            
-            if "--auto" in parts:
-                auto_mode = True
-            
-            mode_text = "auto worker management" if auto_mode else "manual worker control"
-            console.print(f"[#bbfa01]Starting scheduler daemon ({mode_text})...[/#bbfa01]")
-            
-            if auto_mode:
-                console.print(f"[dim]Auto mode: Will automatically manage {workers} workers.[/dim]")
-            else:
-                console.print("[dim]Manual mode: You control workers with 'worker start/stop' commands.[/dim]")
-            
-            try:
-                import sys
-                import os
-                
-                python_exe = sys.executable
-                daemon_script = os.path.join(os.getcwd(), "src", "scheduler_daemon.py")
-                
-                # Start daemon in background
-                daemon_args = [python_exe, daemon_script, "--daemon", "--workers", str(workers)]
-                if auto_mode:
-                    daemon_args.append("--auto")
-                
-                if os.name == 'nt':  # Windows
-                    subprocess.Popen(daemon_args, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-                else:  # Unix/Linux
-                    auto_flag = " --auto" if auto_mode else ""
-                    os.system(f'nohup "{python_exe}" "{daemon_script}" --daemon --workers {workers}{auto_flag} > /dev/null 2>&1 &')
-                
-                console.print("[green]✓ Scheduler daemon started in background![/green]")
-                if auto_mode:
-                    console.print("[dim]Scheduled jobs will be converted to pending and processed automatically.[/dim]")
-                else:
-                    console.print("[dim]Scheduled jobs will be converted to pending. Use 'worker start' to process them.[/dim]")
-                console.print("[dim]Use 'scheduler status' to check if it's running.[/dim]")
-                
-            except Exception as e:
-                console.print(f"[red]Failed to start scheduler daemon: {e}[/red]")
-        
-        elif command == "stop":
-            console.print("[yellow]Stopping scheduler daemon...[/yellow]")
-            
-            # Try to find and stop the daemon process
-            try:
-                import os
-                
-                if os.name == 'nt':  # Windows
-                    # Use wmic to find and kill scheduler processes
-                    result = subprocess.run('wmic process where "commandline like \'%scheduler_daemon.py%\'" get processid /value', 
-                                          shell=True, capture_output=True, text=True)
-                    
-                    # Extract PIDs and kill them
-                    for line in result.stdout.split('\n'):
-                        if 'ProcessId=' in line:
-                            pid = line.split('=')[1].strip()
-                            if pid and pid.isdigit():
-                                subprocess.run(f'taskkill /f /pid {pid}', shell=True, capture_output=True)
-                                console.print(f"[dim]Killed scheduler process PID: {pid}[/dim]")
-                else:  # Unix/Linux
-                    # Use pkill to stop scheduler processes
-                    subprocess.run("pkill -f scheduler_daemon.py", shell=True, capture_output=True)
-                
-                # Also stop any workers
-                subprocess.run("python queuectl.py worker stop", shell=True, capture_output=True)
-                
-                # Create stop file as fallback
-                try:
-                    with open("scheduler_daemon.stop", "w") as f:
-                        f.write("stop")
-                    console.print("[dim]Created stop file for graceful shutdown[/dim]")
-                except:
-                    pass
-                
-                console.print("[green]✓ Scheduler daemon stopped[/green]")
-                console.print("[dim]If daemon is still running, it will stop within 5 seconds[/dim]")
-                
-            except Exception as e:
-                console.print(f"[red]Error stopping daemon: {e}[/red]")
-        
-        elif command == "status":
-            console.print("[yellow]Checking scheduler daemon status...[/yellow]")
-            
-            # Check if daemon process is running
-            try:
-                import os
-                
-                if os.name == 'nt':  # Windows
-                    result = subprocess.run('tasklist /fi "IMAGENAME eq python.exe"', shell=True, capture_output=True, text=True)
-                    if "scheduler_daemon" in result.stdout:
-                        console.print("[green]✓ Scheduler daemon is running[/green]")
-                    else:
-                        console.print("[yellow]Scheduler daemon is not running[/yellow]")
-                else:  # Unix/Linux
-                    result = subprocess.run("pgrep -f scheduler_daemon.py", shell=True, capture_output=True)
-                    if result.returncode == 0:
-                        console.print("[green]✓ Scheduler daemon is running[/green]")
-                    else:
-                        console.print("[yellow]Scheduler daemon is not running[/yellow]")
-                
-                # Show current job status
-                console.print(f"\n[yellow]Current Job Status:[/yellow]")
-                counts = self._get_job_counts()
-                self._display_job_counts(counts)
-                
-            except Exception as e:
-                console.print(f"[red]Error checking status: {e}[/red]")
-        
-        elif command == "logs":
-            console.print("[yellow]Recent scheduler daemon logs:[/yellow]")
-            
-            try:
-                import os
-                
-                log_file = "scheduler_daemon.log"
-                if os.path.exists(log_file):
-                    # Show last 20 lines of log file
-                    with open(log_file, "r", encoding="utf-8") as f:
-                        lines = f.readlines()
-                        recent_lines = lines[-20:] if len(lines) > 20 else lines
-                        
-                    for line in recent_lines:
-                        console.print(f"[dim]{line.strip()}[/dim]")
-                else:
-                    console.print("[yellow]No log file found. Daemon may not be running.[/yellow]")
-                    
-            except Exception as e:
-                console.print(f"[red]Error reading logs: {e}[/red]")
-        
-        else:
-            console.print(f"[red]Unknown scheduler command: {command}[/red]")
-    
+
 
     def do_worker(self, arg):
-        """Worker management
+        """Smart worker management with cron-like scheduling
         Usage: 
-          worker start [--count N] [--silent] - Start workers with live monitoring
-          worker stop                         - Stop all workers
+          worker start [--count N] - Start workers with intelligent scheduling
+          worker stop              - Stop all workers
+          worker status            - Check worker status
         """
         if not arg.strip():
             console.print("[yellow]Worker commands:[/yellow]")
-            console.print("  worker start [--count N] [--silent] - Start workers with live monitoring")
-            console.print("  worker stop                         - Stop all workers")
-            console.print("\n[dim]By default, 'worker start' shows live progress. Use --silent for background mode.[/dim]")
+            console.print("  worker start [--count N] - Start workers with intelligent scheduling")
+            console.print("  worker stop              - Stop all workers")
+            console.print("  worker status            - Check worker status")
+            console.print("\n[dim]Workers process all jobs and can stay running for scheduled jobs like cron.[/dim]")
             return
         
         # Handle worker start
@@ -425,12 +275,150 @@ class QueueCTLShell(cmd.Cmd):
                 except (ValueError, IndexError):
                     count = 2
             
-            # Start workers normally
-            self.run_queuectl_command(f"worker start --count {count}")
+            # Analyze job queue
+            console.print("[#bbfa01]Analyzing job queue...[/#bbfa01]")
+            pending_jobs = self._get_job_count_by_state('pending')
+            scheduled_jobs = self._get_scheduled_jobs_info()
+            
+            if pending_jobs == 0 and not scheduled_jobs:
+                console.print("[yellow]No jobs found in queue.[/yellow]")
+                console.print("[dim]Add jobs with: enqueue {\"id\":\"test\",\"command\":\"echo hello\"}[/dim]")
+                return
+            
+            # Show current job status
+            if pending_jobs > 0:
+                console.print(f"[green]✓ {pending_jobs} job(s) ready for immediate processing[/green]")
+            
+            if scheduled_jobs:
+                console.print(f"\n[yellow]⏰ Found {len(scheduled_jobs)} scheduled job(s):[/yellow]")
+                min_wait_time = float('inf')
+                for job in scheduled_jobs[:5]:  # Show first 5
+                    wait_time = job['wait_seconds']
+                    wait_str = self._format_wait_time(wait_time)
+                    if wait_str == "ready now":
+                        console.print(f"[dim]• {job['id']}: {job['command'][:40]}... ({wait_str})[/dim]")
+                    else:
+                        console.print(f"[dim]• {job['id']}: {job['command'][:40]}... (ready in {wait_str})[/dim]")
+                    min_wait_time = min(min_wait_time, wait_time)
+                
+                if len(scheduled_jobs) > 5:
+                    console.print(f"[dim]... and {len(scheduled_jobs) - 5} more scheduled jobs[/dim]")
+                
+                # Ask user about keeping workers running for scheduled jobs
+                if min_wait_time > 0:
+                    next_job_time = self._format_wait_time(min_wait_time)
+                    console.print(f"\n[yellow]⏰ Next scheduled job ready in: {next_job_time}[/yellow]")
+                    
+                    if min_wait_time > 3600:  # More than 1 hour
+                        console.print("[yellow]📋 Scheduled jobs are far in the future.[/yellow]")
+                        console.print("[dim]Workers will process current jobs and exit.[/dim]")
+                        console.print("[dim]Scheduled jobs will be processed when their time comes (automatic conversion).[/dim]")
+                    else:
+                        console.print("[yellow]📋 Workers can stay running to process scheduled jobs automatically.[/yellow]")
+                        console.print("[dim]This acts like a cron daemon - workers wait and process jobs when ready.[/dim]")
+                        
+                        # Ask user if they want to keep workers running
+                        try:
+                            response = input("\n🤔 Keep workers running for scheduled jobs? (y/N): ").strip().lower()
+                            if response in ['y', 'yes']:
+                                console.print("[green]✓ Workers will stay running and act like cron daemon[/green]")
+                                console.print("[dim]Workers will automatically process scheduled jobs when ready[/dim]")
+                                # Add a flag to keep workers running
+                                self._keep_workers_running = True
+                            else:
+                                console.print("[yellow]Workers will process current jobs and exit[/yellow]")
+                                console.print("[dim]Scheduled jobs will be processed later when you start workers again[/dim]")
+                                self._keep_workers_running = False
+                        except (KeyboardInterrupt, EOFError):
+                            console.print("\n[yellow]Defaulting to process current jobs only[/yellow]")
+                            self._keep_workers_running = False
+            
+            console.print(f"\n[#bbfa01]Starting {count} workers...[/#bbfa01]")
+            if pending_jobs > 0:
+                console.print("[dim]Processing pending jobs with live logs...[/dim]")
+            if scheduled_jobs and getattr(self, '_keep_workers_running', False):
+                console.print("[dim]Workers will stay running for scheduled jobs (cron mode)[/dim]")
+            console.print("[dim]Press Ctrl+C to stop workers gracefully[/dim]")
+            
+            # Start workers with live output using direct execution
+            self._start_workers_with_live_output(count)
             return
         
+        # Handle worker stop with enhanced feedback
+        elif arg.strip() == "stop":
+            console.print("[yellow]Stopping all workers...[/yellow]")
+            
+            # First try to stop background workers if any
+            background_stopped = False
+            if hasattr(self, '_background_process') and self._background_process:
+                try:
+                    if self._background_process.poll() is None:  # Process is still running
+                        console.print("[dim]Stopping background workers...[/dim]")
+                        self._background_process.terminate()
+                        self._background_process.wait(timeout=5)
+                        console.print("[green]✓ Background workers stopped[/green]")
+                        background_stopped = True
+                    self._background_process = None
+                except subprocess.TimeoutExpired:
+                    self._background_process.kill()
+                    console.print("[green]✓ Background workers force stopped[/green]")
+                    background_stopped = True
+                    self._background_process = None
+                except Exception as e:
+                    console.print(f"[yellow]Background worker stop error: {e}[/yellow]")
+            
+            # Also try regular worker stop
+            result = subprocess.run("python queuectl.py worker stop", shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                if not background_stopped:
+                    console.print("[green]✓ Workers stopped successfully[/green]")
+                if result.stdout and "No active workers" not in result.stdout:
+                    console.print(result.stdout.strip())
+            else:
+                if not background_stopped:
+                    console.print(f"[yellow]No active workers found[/yellow]")
+            
+            # Show final job status
+            console.print(f"\n[cyan]📊 Current Job Status:[/cyan]")
+            final_counts = self._get_job_counts()
+            self._display_job_counts(final_counts)
+            
+            # Check for any remaining scheduled jobs
+            scheduled_jobs = self._get_scheduled_jobs_info()
+            if scheduled_jobs:
+                console.print(f"\n[yellow]⏰ {len(scheduled_jobs)} scheduled jobs remaining:[/yellow]")
+                for job in scheduled_jobs[:3]:
+                    wait_str = self._format_wait_time(job['wait_seconds'])
+                    if wait_str == "ready now":
+                        console.print(f"[dim]• {job['id']}: {wait_str}[/dim]")
+                    else:
+                        console.print(f"[dim]• {job['id']}: ready in {wait_str}[/dim]")
+                if len(scheduled_jobs) > 3:
+                    console.print(f"[dim]... and {len(scheduled_jobs) - 3} more[/dim]")
+        
+        # Handle worker status with background worker info
+        elif arg.strip() == "status":
+            # Show regular worker status
+            result = subprocess.run("python queuectl.py worker status", shell=True, capture_output=True, text=True)
+            if result.stdout:
+                console.print(result.stdout.strip())
+            
+            # Also show background worker status
+            if hasattr(self, '_background_process') and self._background_process:
+                if self._background_process.poll() is None:
+                    console.print("[green]Background workers: Running[/green]")
+                    console.print("[dim]Logs being saved to 'worker_logs.txt'[/dim]")
+                    console.print("[dim]Use 'worker stop' to stop background workers[/dim]")
+                else:
+                    console.print("[yellow]Background workers: Stopped[/yellow]")
+                    self._background_process = None
+            else:
+                console.print("[dim]No background workers running[/dim]")
+        
         # Handle other worker commands normally
-        self.run_queuectl_command(f"worker {arg}")
+        else:
+            self.run_queuectl_command(f"worker {arg}")
     
 
     def _get_job_counts(self):
@@ -442,22 +430,23 @@ class QueueCTLShell(cmd.Cmd):
         if result.stdout:
             lines = result.stdout.split('\n')
             for line in lines:
-                # More robust parsing - look for the state column specifically
-                if '|' in line and len(line.split('|')) >= 3:
-                    parts = line.split('|')
+                # Parse the table format - state abbreviations are in column 2
+                if '|' in line and not line.startswith('+') and 'ID' not in line and line.strip():
+                    parts = [p.strip() for p in line.split('|')]
                     if len(parts) >= 3:
-                        state = parts[2].strip().lower()  # State is in the 3rd column
-                        if state == 'pending':
+                        state_abbrev = parts[2].strip()  # State abbreviation is in column 2
+                        # Map abbreviations to full state names
+                        if state_abbrev == 'P':
                             counts['pending'] += 1
-                        elif state == 'processing':
+                        elif state_abbrev == 'R':
                             counts['processing'] += 1
-                        elif state == 'completed':
+                        elif state_abbrev == 'C':
                             counts['completed'] += 1
-                        elif state == 'failed':
+                        elif state_abbrev == 'F':
                             counts['failed'] += 1
-                        elif state == 'dead':
+                        elif state_abbrev == 'D':
                             counts['dead'] += 1
-                        elif state == 'scheduled':
+                        elif state_abbrev == 'S':
                             counts['scheduled'] += 1
         
         return counts
@@ -465,6 +454,334 @@ class QueueCTLShell(cmd.Cmd):
     def _display_job_counts(self, counts):
         """Display job counts in a nice format"""
         console.print(f"Pending: {counts['pending']} | Processing: {counts['processing']} | Completed: {counts['completed']} | Failed: {counts['failed']} | Dead: {counts['dead']} | Scheduled: {counts['scheduled']}")
+    
+    def _get_scheduled_jobs_info(self):
+        """Get information about scheduled jobs including wait times"""
+        try:
+            result = subprocess.run("python queuectl.py list --state scheduled", shell=True, capture_output=True, text=True)
+            scheduled_jobs = []
+            if result.stdout:
+                lines = result.stdout.split('\n')
+                current_job = None
+                
+                for line in lines:
+                    if '|' in line and not line.startswith('+') and not line.startswith('┏') and not line.startswith('┡') and not line.startswith('└'):
+                        parts = [p.strip() for p in line.split('|')]
+                        if len(parts) >= 5:
+                            # Check if this is a main job line (has job ID)
+                            if parts[1] and parts[1] != '' and not parts[1].isspace():
+                                # This is a new job
+                                if current_job:
+                                    scheduled_jobs.append(current_job)
+                                
+                                job_id = parts[1]
+                                state = parts[2] if len(parts) > 2 else ''
+                                command = parts[3] if len(parts) > 3 else ''
+                                scheduled_time = parts[5] if len(parts) > 5 else ''
+                                
+                                if state == 'S':  # Scheduled state
+                                    current_job = {
+                                        'id': job_id,
+                                        'command': command,
+                                        'scheduled_time': scheduled_time,
+                                        'wait_seconds': 0
+                                    }
+                            elif current_job and len(parts) > 5:
+                                # This might be a continuation line with the time
+                                time_part = parts[5].strip()
+                                if time_part and ':' in time_part:
+                                    # Combine with previous scheduled_time if it exists
+                                    if current_job['scheduled_time']:
+                                        current_job['scheduled_time'] += ' ' + time_part
+                                    else:
+                                        current_job['scheduled_time'] = time_part
+                
+                # Don't forget the last job
+                if current_job:
+                    scheduled_jobs.append(current_job)
+                
+                # Calculate wait times
+                for job in scheduled_jobs:
+                    job['wait_seconds'] = self._calculate_wait_time(job['scheduled_time'])
+                    
+            return scheduled_jobs
+        except Exception as e:
+            console.print(f"[red]Error getting scheduled jobs: {e}[/red]")
+            return []
+    
+    def _get_job_count_by_state(self, state):
+        """Get count of jobs in specific state"""
+        try:
+            result = subprocess.run(f"python queuectl.py list --state {state}", shell=True, capture_output=True, text=True)
+            if "No jobs found" in result.stdout:
+                return 0
+            # Count lines with job data (contains '|' but not table borders)
+            count = 0
+            if result.stdout:
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if '|' in line and not line.startswith('+') and not 'ID' in line and line.strip():
+                        count += 1
+            return count
+        except Exception:
+            return 0
+    
+    def _calculate_wait_time(self, scheduled_time_str):
+        """Calculate seconds until scheduled time"""
+        try:
+            from datetime import datetime, timezone
+            import re
+            # Parse the scheduled time (format: "11-10 04:20")
+            if not scheduled_time_str or scheduled_time_str == '-':
+                return 0
+            
+            # Extract time parts
+            time_match = re.match(r'(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', scheduled_time_str)
+            if not time_match:
+                return 0
+            
+            month, day, hour, minute = map(int, time_match.groups())
+            # Create datetime object (assume current year)
+            now = datetime.now(timezone.utc)
+            scheduled_dt = datetime(now.year, month, day, hour, minute, tzinfo=timezone.utc)
+            
+            # If scheduled time is in the past, it's ready now
+            wait_seconds = (scheduled_dt - now).total_seconds()
+            return max(0, wait_seconds)
+        except Exception:
+            return 0
+    
+    def _format_wait_time(self, seconds):
+        """Format wait time in human readable format"""
+        if seconds <= 0:
+            return "ready now"
+        elif seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            minutes = int(seconds / 60)
+            return f"{minutes}m {int(seconds % 60)}s"
+        else:
+            hours = int(seconds / 3600)
+            minutes = int((seconds % 3600) / 60)
+            return f"{hours}h {minutes}m"
+    
+    def _start_workers_with_live_output(self, count):
+        """Start workers and show live output with intelligent scheduling"""
+        try:
+            import sys
+            import os
+            import subprocess
+            import threading
+            import time
+            
+            # Import worker manager directly
+            sys.path.append(os.getcwd())
+            from src.worker_manager import WorkerManager
+            from src.job_queue import JobQueue
+            
+            # Create instances
+            job_queue = JobQueue()
+            worker_manager = WorkerManager(job_queue)
+            
+            console.print(f"[green]Starting {count} worker process(es)...[/green]")
+            
+            # Start workers using subprocess with live output
+            python_exe = sys.executable
+            script_path = os.path.join(os.getcwd(), "queuectl.py")
+            
+            cmd = [python_exe, script_path, "worker", "start", "--count", str(count)]
+            
+            # Start the process and capture output in real-time
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+            
+            jobs_completed = 0
+            last_activity_time = time.time()
+            
+            try:
+                # Read output line by line and display it
+                while True:
+                    output = process.stdout.readline()
+                    if output == '' and process.poll() is not None:
+                        break
+                    if output:
+                        # Clean up the output and display it
+                        line = output.strip()
+                        if line:
+                            # Color code different types of log messages
+                            if "INFO:worker_manager:" in line:
+                                console.print(f"[blue]{line}[/blue]")
+                            elif "Worker" in line and "started" in line:
+                                console.print(f"[green]{line}[/green]")
+                            elif "Processing job" in line:
+                                console.print(f"[yellow]{line}[/yellow]")
+                                last_activity_time = time.time()
+                            elif "completed successfully" in line:
+                                console.print(f"[green]{line}[/green]")
+                                jobs_completed += 1
+                                last_activity_time = time.time()
+                            elif "failed" in line.lower():
+                                console.print(f"[red]{line}[/red]")
+                                last_activity_time = time.time()
+                            elif "ERROR" in line:
+                                console.print(f"[red]{line}[/red]")
+                            else:
+                                console.print(line)
+                    
+                    # Check if workers have been idle for a while (no pending jobs)
+                    if time.time() - last_activity_time > 5:  # 5 seconds of inactivity
+                        # Show current job status
+                        current_counts = self._get_job_counts()
+                        console.print(f"\n[cyan]📊 Current Job Status:[/cyan]")
+                        self._display_job_counts(current_counts)
+                        
+                        # Check for scheduled jobs
+                        scheduled_jobs = self._get_scheduled_jobs_info()
+                        ready_scheduled = [job for job in scheduled_jobs if job['wait_seconds'] <= 0]
+                        future_scheduled = [job for job in scheduled_jobs if job['wait_seconds'] > 0]
+                        
+                        # Check if there are any pending jobs still being processed
+                        has_pending = current_counts['pending'] > 0 or current_counts['processing'] > 0
+                        
+                        if ready_scheduled and not has_pending:
+                            # Check if these "ready" jobs are actually being processed
+                            # Wait a bit to see if they get picked up
+                            console.print(f"\n[yellow]⏰ Found {len(ready_scheduled)} scheduled job(s) ready to run![/yellow]")
+                            for job in ready_scheduled[:3]:
+                                console.print(f"[dim]• {job['id']}: {job['command'][:40]}...[/dim]")
+                            console.print("[dim]Checking if these will be processed automatically...[/dim]")
+                            
+                            # Wait and check again
+                            time.sleep(2)
+                            
+                            # Re-check job status after waiting
+                            updated_counts = self._get_job_counts()
+                            updated_scheduled = self._get_scheduled_jobs_info()
+                            updated_ready = [job for job in updated_scheduled if job['wait_seconds'] <= 0]
+                            updated_future = [job for job in updated_scheduled if job['wait_seconds'] > 0]
+                            updated_has_pending = updated_counts['pending'] > 0 or updated_counts['processing'] > 0
+                            
+                            if updated_ready and not updated_has_pending:
+                                # Jobs are still "ready" but not being processed - they might be stuck
+                                # Treat this as if we only have future scheduled jobs
+                                console.print("[dim]Jobs appear to be ready but not processing - treating as future scheduled[/dim]")
+                                future_scheduled = updated_ready + updated_future
+                                ready_scheduled = []
+                            else:
+                                # Jobs are being processed or converted, reset timer
+                                last_activity_time = time.time()
+                                continue
+                        elif future_scheduled and not has_pending and not ready_scheduled:
+                            min_wait = min(job['wait_seconds'] for job in future_scheduled)
+                            wait_str = self._format_wait_time(min_wait)
+                            
+                            console.print(f"\n[green]✅ All immediate jobs completed![/green]")
+                            console.print(f"[yellow]⏰ Next scheduled job ready in: {wait_str}[/yellow]")
+                            
+                            # Show final job summary
+                            console.print(f"\n[cyan]📊 Final Job Summary:[/cyan]")
+                            console.print(f"[green]✓ Completed: {current_counts['completed']} jobs[/green]")
+                            if current_counts['dead'] > 0:
+                                console.print(f"[red]✗ Failed (DLQ): {current_counts['dead']} jobs[/red]")
+                            if len(future_scheduled) > 0:
+                                console.print(f"[yellow]⏰ Scheduled: {len(future_scheduled)} jobs remaining[/yellow]")
+                                for job in future_scheduled[:3]:
+                                    job_wait = self._format_wait_time(job['wait_seconds'])
+                                    console.print(f"[dim]   • {job['id']}: ready in {job_wait}[/dim]")
+                            
+                            # Always ask user what to do
+                            console.print(f"\n[cyan]What would you like to do?[/cyan]")
+                            console.print(f"[green]1. Continue waiting[/green] - Workers run in background, logs saved to file")
+                            console.print(f"[yellow]2. Stop and exit[/yellow] - Stop workers and return to shell")
+                            
+                            try:
+                                response = input(f"\nContinue waiting for scheduled jobs? (y/N): ").strip().lower()
+                                if response in ['y', 'yes']:
+                                    # Start background mode
+                                    console.print(f"\n[green]✓ Workers continuing in background mode...[/green]")
+                                    console.print(f"[dim]• Logs will be saved to 'worker_logs.txt'[/dim]")
+                                    console.print(f"[dim]• Use 'worker stop' to stop background workers[/dim]")
+                                    console.print(f"[dim]• Use 'worker status' to check worker status[/dim]")
+                                    console.print(f"[green]Returning to interactive shell...[/green]")
+                                    
+                                    # Detach the process and save logs to file
+                                    import threading
+                                    import datetime
+                                    
+                                    def background_logger():
+                                        try:
+                                            with open('worker_logs.txt', 'a', encoding='utf-8') as log_file:
+                                                timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                                log_file.write(f"\n=== Background mode started at {timestamp} ===\n")
+                                                log_file.write(f"Next scheduled job in: {wait_str}\n")
+                                                log_file.write("Workers will continue processing scheduled jobs...\n\n")
+                                                log_file.flush()
+                                                
+                                                # Continue reading process output
+                                                while True:
+                                                    try:
+                                                        output = process.stdout.readline()
+                                                        if output == '' and process.poll() is not None:
+                                                            log_file.write("=== Workers finished ===\n")
+                                                            break
+                                                        if output:
+                                                            log_file.write(output)
+                                                            log_file.flush()
+                                                    except:
+                                                        break
+                                        except Exception as e:
+                                            console.print(f"[red]Error writing to log file: {e}[/red]")
+                                    
+                                    # Start background logging thread
+                                    bg_thread = threading.Thread(target=background_logger, daemon=True)
+                                    bg_thread.start()
+                                    
+                                    # Store process reference for worker stop command
+                                    self._background_process = process
+                                    
+                                    # Return to shell immediately
+                                    return
+                                else:
+                                    console.print(f"\n[yellow]Stopping workers and returning to shell...[/yellow]")
+                                    break
+                            except (KeyboardInterrupt, EOFError):
+                                console.print(f"\n[yellow]Stopping workers...[/yellow]")
+                                break
+                        elif not has_pending and not ready_scheduled and not future_scheduled:
+                            # No jobs at all, workers can exit
+                            console.print(f"\n[green]✅ All jobs completed![/green]")
+                            if jobs_completed > 0:
+                                console.print(f"[green]📊 Processed {jobs_completed} jobs successfully[/green]")
+                            
+                            # Show final status
+                            console.print(f"\n[cyan]📊 Final Status:[/cyan]")
+                            self._display_job_counts(current_counts)
+                            break
+                        else:
+                            # Still have pending/processing jobs, continue waiting
+                            last_activity_time = time.time()
+                
+                # Wait for process to complete
+                process.wait()
+                
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopping workers...[/yellow]")
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                console.print("[green]Workers stopped[/green]")
+                
+        except Exception as e:
+            console.print(f"[red]Error starting workers: {e}[/red]")
+            # Fallback to regular command
+            self.run_queuectl_command(f"worker start --count {count}")
     
 
     def do_time(self, arg):
@@ -483,20 +800,7 @@ class QueueCTLShell(cmd.Cmd):
         minutes, _ = divmod(remainder, 60)
         console.print(f"  Offset: UTC{hours:+03d}:{minutes:02d}")
     
-    def do_stop_workers(self, arg):
-        """Stop all running workers and show final status"""
-        console.print("[yellow]Stopping all workers...[/yellow]")
-        result = subprocess.run("python queuectl.py worker stop", shell=True, capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            console.print("[green]✓ Workers stopped successfully[/green]")
-        else:
-            console.print(f"[red]Worker stop result: {result.stdout or result.stderr}[/red]")
-        
-        # Show final job status
-        console.print(f"\n[yellow]Final Job Status:[/yellow]")
-        final_counts = self._get_job_counts()
-        self._display_job_counts(final_counts)
+
     
 
     def do_dlq(self, arg):

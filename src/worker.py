@@ -35,15 +35,53 @@ class Worker:
         self.logger = logging.getLogger(f'worker_{worker_id}')
     
     def start(self):
-        """Start the worker main loop"""
+        """Start the worker main loop with intelligent scheduling"""
         self.running = True
         self.logger.info(f"Worker {self.worker_id} started")
+        
+        idle_count = 0
+        max_idle_before_check = 30  # Check for scheduled jobs every 30 seconds when idle
         
         try:
             while self.running:
                 try:
-                    self._process_next_job()
-                    time.sleep(1)  # Poll every second
+                    job_processed = self._process_next_job()
+                    
+                    if job_processed:
+                        idle_count = 0  # Reset idle counter when job is processed
+                        time.sleep(1)  # Short sleep after processing
+                    else:
+                        idle_count += 1
+                        
+                        # Check for scheduled jobs periodically when idle
+                        if idle_count >= max_idle_before_check:
+                            scheduled_jobs = self._check_scheduled_jobs()
+                            if scheduled_jobs:
+                                next_job_time = self._get_next_scheduled_time(scheduled_jobs)
+                                if next_job_time:
+                                    wait_seconds = next_job_time
+                                    if wait_seconds <= 300:  # 5 minutes or less
+                                        self.logger.info(f"Next scheduled job in {self._format_wait_time(wait_seconds)} - staying active")
+                                        idle_count = 0  # Reset to keep checking
+                                    elif wait_seconds <= 3600:  # 1 hour or less
+                                        self.logger.info(f"Next scheduled job in {self._format_wait_time(wait_seconds)} - periodic check mode")
+                                        time.sleep(60)  # Check every minute for jobs due within an hour
+                                        idle_count = 0
+                                    else:
+                                        self.logger.info(f"Next scheduled job in {self._format_wait_time(wait_seconds)} - long wait mode")
+                                        time.sleep(300)  # Check every 5 minutes for distant jobs
+                                        idle_count = 0
+                                else:
+                                    # No scheduled jobs, check if we should exit
+                                    self.logger.info("No more jobs to process - worker will exit")
+                                    break
+                            else:
+                                # No scheduled jobs, check if we should exit
+                                self.logger.info("No more jobs to process - worker will exit")
+                                break
+                        else:
+                            time.sleep(1)  # Normal polling interval
+                            
                 except Exception as e:
                     self.logger.error(f"Error in worker loop: {e}")
                     time.sleep(5)  # Wait longer on error
@@ -60,7 +98,7 @@ class Worker:
         """Process the next available job"""
         job = self.job_queue.get_next_job()
         if not job:
-            return
+            return False  # No job processed
         
         # Try to acquire lock for this job
         lock_file = os.path.join(self.lock_dir, f"{job['id']}.lock")
@@ -71,11 +109,12 @@ class Worker:
                 f.write(self.worker_id)
         except FileExistsError:
             # Job is already being processed by another worker
-            return
+            return False  # No job processed
         
         try:
             self.current_job = job
             self._execute_job(job)
+            return True  # Job processed successfully
         finally:
             # Always release the lock
             try:
@@ -225,6 +264,58 @@ class Worker:
             
             self.logger.info(f"Job {job_id} scheduled for retry in {delay_seconds}s "
                            f"(attempt {new_attempts}/{max_retries})")
+    
+    def _check_scheduled_jobs(self):
+        """Check for scheduled jobs in the queue"""
+        try:
+            import sqlite3
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM jobs WHERE state = 'scheduled' ORDER BY run_at ASC")
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Error checking scheduled jobs: {e}")
+            return []
+    
+    def _get_next_scheduled_time(self, scheduled_jobs):
+        """Get seconds until the next scheduled job"""
+        if not scheduled_jobs:
+            return None
+        
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            
+            for job in scheduled_jobs:
+                run_at = job.get('run_at')
+                if run_at:
+                    try:
+                        # Parse ISO format
+                        scheduled_time = datetime.fromisoformat(run_at.replace('Z', '+00:00'))
+                        wait_seconds = (scheduled_time - now).total_seconds()
+                        if wait_seconds > 0:
+                            return wait_seconds
+                    except Exception:
+                        continue
+            return None
+        except Exception as e:
+            self.logger.error(f"Error calculating next scheduled time: {e}")
+            return None
+    
+    def _format_wait_time(self, seconds):
+        """Format wait time in human readable format"""
+        if seconds <= 0:
+            return "ready now"
+        elif seconds < 60:
+            return f"{int(seconds)}s"
+        elif seconds < 3600:
+            minutes = int(seconds / 60)
+            return f"{minutes}m {int(seconds % 60)}s"
+        else:
+            hours = int(seconds / 3600)
+            minutes = int((seconds % 3600) / 60)
+            return f"{hours}h {minutes}m"
 
 
 def worker_process(worker_id: str, db_path: str, lock_dir: str):

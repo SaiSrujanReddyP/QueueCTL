@@ -1,0 +1,8 @@
+
+=== Background mode started at 2025-11-10 14:58:15 ===
+Next scheduled job in: 2h 32m
+Workers will continue processing scheduled jobs...
+
+[worker_1762766833_0] 2025-11-10 14:57:55,560 - INFO - Next scheduled job in 2h 32m - long wait mode
+[worker_1762766833_1] 2025-11-10 15:03:22,592 - INFO - Next scheduled job in 2h 26m - long wait mode
+[worker_1762766833_0] 2025-11-10 15:03:24,640 - INFO - Next scheduled job in 2h 26m - long wait mode

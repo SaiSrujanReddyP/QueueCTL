@@ -87,7 +87,8 @@ def main_callback(
 @app.command()
 def enqueue(
     job_json: str = typer.Argument(..., help="Job JSON string"),
-    priority: Optional[int] = typer.Option(None, "--priority", "-p", help="Job priority (higher numbers = higher priority)")
+    priority: Optional[int] = typer.Option(None, "--priority", "-p", help="Job priority (higher numbers = higher priority)"),
+    force: bool = typer.Option(False, "--force", "-f", help="Replace existing job with same ID")
 ):
     """
     Add a new job to the queue.
@@ -121,11 +122,21 @@ def enqueue(
         if "command" not in job_data:
             raise typer.BadParameter("Job must contain 'command' field")
         
-        job = job_queue.enqueue(job_data)
-        console.print(f"[green]OK[/green] Job enqueued: [bold]{job['id']}[/bold]")
-        console.print(f"  Command: {job['command']}")
-        console.print(f"  Priority: {job['priority']}")
-        console.print(f"  Max retries: {job['max_retries']}")
+        try:
+            job = job_queue.enqueue(job_data, force_replace=force)
+            action = "replaced" if force else "enqueued"
+            console.print(f"[green]OK[/green] Job {action}: [bold]{job['id']}[/bold]")
+            console.print(f"  Command: {job['command']}")
+            console.print(f"  Priority: {job['priority']}")
+            console.print(f"  Max retries: {job['max_retries']}")
+            
+        except ValueError as e:
+            if "already exists" in str(e):
+                console.print(f"[yellow]Warning:[/yellow] {e}")
+                console.print("[dim]Use --force to replace the existing job[/dim]")
+                raise typer.Exit(1)
+            else:
+                raise
         
     except json.JSONDecodeError as e:
         console.print(f"[red]Error:[/red] Invalid JSON format: {e}")
@@ -174,6 +185,16 @@ def stop_workers():
         active_count = worker_manager.get_active_worker_count()
         if active_count == 0:
             console.print("[yellow]No active workers to stop[/yellow]")
+            # Also try to kill any background Python processes that might be workers
+            console.print("[dim]Checking for background worker processes...[/dim]")
+            try:
+                import subprocess
+                result = subprocess.run(['tasklist', '/fi', 'imagename eq python.exe'], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0 and 'python.exe' in result.stdout:
+                    console.print("[dim]Found Python processes running. Use 'worker kill-all' to force stop them.[/dim]")
+            except:
+                pass
             return
             
         worker_manager.stop_all()
@@ -181,6 +202,56 @@ def stop_workers():
         
     except Exception as e:
         console.print(f"[red]Error stopping workers:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@worker_app.command("kill-all")
+def kill_all_workers():
+    """Force kill all Python worker processes (use with caution)"""
+    try:
+        import subprocess
+        import os
+        
+        console.print("[yellow]Warning:[/yellow] This will attempt to kill ALL Python processes!")
+        console.print("[dim]This is a last resort if workers are stuck.[/dim]")
+        
+        if not typer.confirm("Are you sure you want to continue?"):
+            console.print("Cancelled.")
+            return
+        
+        # Get all Python processes
+        result = subprocess.run(['tasklist', '/fi', 'imagename eq python.exe'], 
+                              capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            console.print("[red]Error:[/red] Could not list processes")
+            return
+        
+        # Parse PIDs from tasklist output
+        lines = result.stdout.split('\n')
+        killed_count = 0
+        
+        for line in lines:
+            if 'python.exe' in line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        pid = int(parts[1])
+                        # Don't kill our own process
+                        if pid != os.getpid():
+                            subprocess.run(['taskkill', '/F', '/PID', str(pid)], 
+                                         capture_output=True)
+                            killed_count += 1
+                    except (ValueError, subprocess.SubprocessError):
+                        continue
+        
+        if killed_count > 0:
+            console.print(f"[green]OK[/green] Attempted to kill {killed_count} Python processes")
+        else:
+            console.print("[yellow]No Python processes found to kill[/yellow]")
+        
+    except Exception as e:
+        console.print(f"[red]Error killing processes:[/red] {e}")
         raise typer.Exit(1)
 
 

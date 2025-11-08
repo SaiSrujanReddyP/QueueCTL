@@ -107,11 +107,16 @@ class JobQueue:
         except sqlite3.OperationalError:
             pass
     
-    def enqueue(self, job_data: Dict[str, Any]) -> Dict[str, Any]:
+    def enqueue(self, job_data: Dict[str, Any], force_replace: bool = False) -> Dict[str, Any]:
         """Add a new job to the queue with enhanced features"""
         with self._lock:
             job_id = job_data.get('id', str(uuid.uuid4()))
             now = datetime.now(timezone.utc).isoformat()
+            
+            # Check if job already exists
+            existing_job = self.get_job(job_id)
+            if existing_job and not force_replace:
+                raise ValueError(f"Job with ID '{job_id}' already exists. Use force_replace=True to overwrite.")
             
             # Handle scheduled jobs
             run_at = job_data.get('run_at')
@@ -146,22 +151,37 @@ class JobQueue:
             }
             
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    INSERT INTO jobs (id, command, state, attempts, max_retries, priority,
-                                    timeout_seconds, run_at, created_at, updated_at, started_at,
-                                    completed_at, next_retry_at, output, error, execution_time_ms, worker_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    job['id'], job['command'], job['state'], job['attempts'],
-                    job['max_retries'], job['priority'], job['timeout_seconds'],
-                    job['run_at'], job['created_at'], job['updated_at'],
-                    job['started_at'], job['completed_at'], job['next_retry_at'],
-                    job['output'], job['error'], job['execution_time_ms'], job['worker_id']
-                ))
+                if existing_job and force_replace:
+                    # Update existing job
+                    conn.execute("""
+                        UPDATE jobs SET command = ?, state = ?, attempts = 0, max_retries = ?, 
+                                      priority = ?, timeout_seconds = ?, run_at = ?, updated_at = ?,
+                                      started_at = NULL, completed_at = NULL, next_retry_at = NULL,
+                                      output = NULL, error = NULL, execution_time_ms = 0, worker_id = NULL
+                        WHERE id = ?
+                    """, (
+                        job['command'], job['state'], job['max_retries'], job['priority'],
+                        job['timeout_seconds'], job['run_at'], job['updated_at'], job['id']
+                    ))
+                else:
+                    # Insert new job
+                    conn.execute("""
+                        INSERT INTO jobs (id, command, state, attempts, max_retries, priority,
+                                        timeout_seconds, run_at, created_at, updated_at, started_at,
+                                        completed_at, next_retry_at, output, error, execution_time_ms, worker_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        job['id'], job['command'], job['state'], job['attempts'],
+                        job['max_retries'], job['priority'], job['timeout_seconds'],
+                        job['run_at'], job['created_at'], job['updated_at'],
+                        job['started_at'], job['completed_at'], job['next_retry_at'],
+                        job['output'], job['error'], job['execution_time_ms'], job['worker_id']
+                    ))
                 conn.commit()
             
             # Log job creation metric
-            self._log_job_metric(job_id, 'created', {'priority': job['priority'], 'scheduled': bool(run_at)})
+            action = 'replaced' if existing_job and force_replace else 'created'
+            self._log_job_metric(job_id, action, {'priority': job['priority'], 'scheduled': bool(run_at)})
             
             return job
     
