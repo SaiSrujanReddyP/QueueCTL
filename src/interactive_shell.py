@@ -1149,6 +1149,82 @@ class QueueCTLShell(cmd.Cmd):
         console.print("[dim]Check metrics with: metrics[/dim]")
         console.print("[dim]View web dashboard: dashboard[/dim]")
     
+    def do_test(self, arg):
+        """Run comprehensive test suite
+        Usage:
+        test                    - Show test menu
+        test <test_name>        - Run specific test
+        test all               - Run all tests
+        
+        Available tests:
+        - test_bonus_features    - Test bonus features and enhancements
+        - test_deliverables      - Test core deliverable requirements
+        - test_config            - Test configuration management
+        - test_dlq               - Test Dead Letter Queue functionality
+        - test_enqueue           - Test job enqueuing and scheduling
+        - test_list              - Test job listing and filtering
+        - test_metrics           - Test performance metrics
+        - test_status            - Test system status reporting
+        - test_dashboard         - Test web dashboard functionality
+        - test_worker            - Test worker management
+        """
+        
+        if not arg.strip():
+            # Show test menu
+            console.print("[cyan]QueueCTL Test Suite[/cyan]")
+            console.print()
+            console.print("Available Tests:")
+            console.print("1.  test_bonus_features    - Test bonus features and enhancements")
+            console.print("2.  test_deliverables      - Test core deliverable requirements")
+            console.print("3.  test_config            - Test configuration management")
+            console.print("4.  test_dlq               - Test Dead Letter Queue functionality")
+            console.print("5.  test_enqueue           - Test job enqueuing and scheduling")
+            console.print("6.  test_list              - Test job listing and filtering")
+            console.print("7.  test_metrics           - Test performance metrics")
+            console.print("8.  test_status            - Test system status reporting")
+            console.print("9.  test_dashboard         - Test web dashboard functionality")
+            console.print("10. test_worker            - Test worker management")
+            console.print("11. test_all               - Run all tests")
+            console.print()
+            console.print("Usage: test <test_name>")
+            console.print("Example: test test_worker")
+            return
+        
+        # Run specific test
+        test_name = arg.strip()
+        
+        try:
+            import sys
+            import os
+            
+            # Get the Python executable and test runner path
+            python_exe = sys.executable
+            test_runner_path = os.path.join(os.getcwd(), "test_runner.py")
+            
+            if not os.path.exists(test_runner_path):
+                console.print("[red]Test runner not found. Please ensure test_runner.py exists.[/red]")
+                return
+            
+            console.print(f"[cyan]Running {test_name}...[/cyan]")
+            console.print("=" * 50)
+            
+            # Run the test
+            result = subprocess.run(
+                [python_exe, test_runner_path, test_name],
+                capture_output=False,
+                text=True
+            )
+            
+            console.print("=" * 50)
+            
+            if result.returncode == 0:
+                console.print(f"[green]Test {test_name} completed successfully[/green]")
+            else:
+                console.print(f"[yellow]Test {test_name} completed with issues[/yellow]")
+                
+        except Exception as e:
+            console.print(f"[red]Error running test: {e}[/red]")
+    
     def do_verify_all(self, arg):
         """Complete verification of all features"""
         console.print("[bold green]Complete QueueCTL Verification[/bold green]\n")
